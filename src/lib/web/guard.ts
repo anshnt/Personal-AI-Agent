@@ -132,10 +132,11 @@ function isBlockedV6(address: string): boolean {
   // The hex form of the same thing, ::ffff:7f00:1.
   if (lower.startsWith('::ffff:')) return true;
 
-  if (lower.startsWith('fe8') || lower.startsWith('fe9')) return true; // link-local
-  if (lower.startsWith('fea') || lower.startsWith('feb')) return true; // link-local
-  if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // unique local
-  if (lower.startsWith('ff')) return true; // multicast
+  // fc00::/7 unique local, fe00::/9 reserved, fe80::/10 link-local,
+  // fec0::/10 site-local (deprecated but still routed on some networks), and
+  // ff00::/8 multicast all sit under these four prefixes. Enumerating the
+  // nibbles individually is how fec0:: got missed the first time.
+  if (/^f[cdef]/.test(lower)) return true;
   if (lower.startsWith('64:ff9b:')) return true; // NAT64
   if (lower.startsWith('100:')) return true; // discard-only
   if (lower.startsWith('2001:db8')) return true; // documentation

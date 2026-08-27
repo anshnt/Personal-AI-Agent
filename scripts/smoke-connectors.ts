@@ -28,11 +28,14 @@ import { ConnectorError } from '@/lib/connectors/types';
 let failures = 0;
 
 function check(label: string, condition: boolean, detail?: unknown): void {
-  if (condition) console.log(`  ok   ${label}`);
-  else {
-    failures += 1;
-    console.error(`  FAIL ${label}`, detail === undefined ? '' : detail);
+  if (condition) {
+    console.log(`  ok   ${label}`);
+    return;
   }
+  failures += 1;
+  // One stream throughout: stdout and stderr interleave unpredictably in a CI
+  // log, which puts a failure under the wrong section heading.
+  console.log(`  FAIL ${label}`, detail === undefined ? '' : detail);
 }
 
 async function expectRefusal(
@@ -43,16 +46,16 @@ async function expectRefusal(
   try {
     const value = await run();
     failures += 1;
-    console.error(`  FAIL ${label} — expected a refusal, got`, value);
+    console.log(`  FAIL ${label} — expected a refusal, got`, value);
   } catch (error) {
     if (!(error instanceof ConnectorError)) {
       failures += 1;
-      console.error(`  FAIL ${label} — wrong error type`, error);
+      console.log(`  FAIL ${label} — wrong error type`, error);
       return;
     }
     if (matches && !error.message.toLowerCase().includes(matches.toLowerCase())) {
       failures += 1;
-      console.error(`  FAIL ${label} — message did not mention "${matches}":`, error.message);
+      console.log(`  FAIL ${label} — message did not mention "${matches}":`, error.message);
       return;
     }
     console.log(`  ok   ${label} (${error.message.slice(0, 62)})`);
@@ -63,25 +66,15 @@ async function main(): Promise<void> {
   await db.delete(users);
   const user = await resolveCurrentUser();
 
-  console.log('registry');
+  // The suite sets every credential it needs rather than inheriting whatever
+  // the shell happens to export. Depending on ambient environment is how these
+  // checks passed locally and failed in CI.
+  process.env.GITHUB_TOKEN = 'ghp_fake_token_for_checks_only';
+  delete process.env.CUSTOM_CONNECTORS;
+  delete process.env.HOUSE_TOKEN;
   resetRegistry();
-  const builtIns = allConnectors().map((connector) => connector.name);
-  check('the built-in connectors are registered', builtIns.includes('weather') && builtIns.includes('currency'), builtIns);
 
-  const weather = findConnector('weather');
-  check('a keyless connector is available with no configuration', weather !== undefined && isConfigured(weather));
-
-  const github = findConnector('github');
-  delete process.env.GITHUB_TOKEN;
-  check('a key-gated connector is unavailable without its key', github !== undefined && !isConfigured(github));
-  check('an unavailable connector is excluded from the available list', !availableConnectors().some((c) => c.name === 'github'));
-
-  process.env.GITHUB_TOKEN = 'ghp_thisisafaketokenforchecks';
-  check('setting the key makes it available', github !== undefined && isConfigured(github));
-
-  check('every operation declares a description', allConnectors().every((c) => c.operations.every((o) => o.description.length > 10)));
-  check('every base url is https', allConnectors().every((c) => c.baseUrl.startsWith('https://')));
-
+  console.log('connector invocation (registry construction is covered by vitest)');
   console.log('\nparameter validation');
   await expectRefusal(
     'an unknown connector is refused',

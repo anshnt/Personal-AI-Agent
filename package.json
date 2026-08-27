@@ -9,6 +9,8 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "smoke": "tsx scripts/smoke.ts && tsx scripts/smoke-documents.ts && tsx scripts/smoke-email.ts && tsx scripts/smoke-web.ts && tsx scripts/smoke-schedule.ts && tsx scripts/smoke-connectors.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
@@ -38,7 +40,8 @@
     "@types/react-dom": "^19.2.5",
     "drizzle-kit": "^0.31.10",
     "tsx": "^4.23.12",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
   },
   "description": "A personal AI agent with long-term memory, task management, and tool access to the outside world.",
   "engines": {

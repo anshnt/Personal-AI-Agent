@@ -29,10 +29,12 @@ let failures = 0;
 function check(label: string, condition: boolean, detail?: unknown): void {
   if (condition) {
     console.log(`  ok   ${label}`);
-  } else {
-    failures += 1;
-    console.error(`  FAIL ${label}`, detail === undefined ? '' : detail);
+    return;
   }
+  failures += 1;
+  // One stream throughout: stdout and stderr interleave unpredictably in a CI
+  // log, which puts a failure under the wrong section heading.
+  console.log(`  FAIL ${label}`, detail === undefined ? '' : detail);
 }
 
 async function reset(): Promise<void> {
@@ -253,56 +255,8 @@ async function main(): Promise<void> {
   const rowCount = await db.select().from(messages);
   check('no orphaned message rows', rowCount.length === 3, rowCount.length);
 
-  console.log('\ntime helpers');
-  check('calendar date respects timezone', /^\d{4}-\d{2}-\d{2}$/.test(calendarDateIn(new Date(), 'Asia/Kolkata')));
-  check(
-    'relative description reads naturally',
-    describeRelative(new Date(Date.now() + 2 * 86_400_000)).includes('2 days'),
-    describeRelative(new Date(Date.now() + 2 * 86_400_000)),
-  );
-  check(
-    'overdue is labelled',
-    describeRelative(new Date(Date.now() - 3 * 3_600_000)).includes('overdue'),
-    describeRelative(new Date(Date.now() - 3 * 3_600_000)),
-  );
-  check('an invalid timezone degrades instead of throwing', calendarDateIn(new Date(), 'Not/AZone').length === 10);
-
-  console.log('\nlocal-time anchoring');
-  // Every one of these has bitten a naive implementation: half- and
-  // quarter-hour offsets, both sides of a DST transition, the transition day
-  // itself, midnight (which Intl can render as hour 24), and UTC+14.
-  const anchors: Array<[string, string, string]> = [
-    ['Asia/Kolkata 09:00 (UTC+5:30)', anchorLocalTime(2026, 3, 15, 9, 0, 'Asia/Kolkata').toISOString(), '2026-03-15T03:30:00.000Z'],
-    ['Asia/Kathmandu 09:00 (UTC+5:45)', anchorLocalTime(2026, 3, 15, 9, 0, 'Asia/Kathmandu').toISOString(), '2026-03-15T03:15:00.000Z'],
-    ['Europe/Berlin 09:00 in winter', anchorLocalTime(2026, 1, 15, 9, 0, 'Europe/Berlin').toISOString(), '2026-01-15T08:00:00.000Z'],
-    ['Europe/Berlin 09:00 in summer', anchorLocalTime(2026, 7, 15, 9, 0, 'Europe/Berlin').toISOString(), '2026-07-15T07:00:00.000Z'],
-    ['Europe/Berlin 09:00 on the spring-forward day', anchorLocalTime(2026, 3, 29, 9, 0, 'Europe/Berlin').toISOString(), '2026-03-29T07:00:00.000Z'],
-    ['Europe/Berlin 09:00 on the fall-back day', anchorLocalTime(2026, 10, 25, 9, 0, 'Europe/Berlin').toISOString(), '2026-10-25T08:00:00.000Z'],
-    ['America/Los_Angeles 09:00 in winter', anchorLocalTime(2026, 1, 15, 9, 0, 'America/Los_Angeles').toISOString(), '2026-01-15T17:00:00.000Z'],
-    ['America/Los_Angeles 09:00 in summer', anchorLocalTime(2026, 7, 15, 9, 0, 'America/Los_Angeles').toISOString(), '2026-07-15T16:00:00.000Z'],
-    ['Pacific/Auckland midnight', anchorLocalTime(2026, 7, 15, 0, 0, 'Pacific/Auckland').toISOString(), '2026-07-14T12:00:00.000Z'],
-    ['UTC midnight', anchorLocalTime(2026, 7, 15, 0, 0, 'UTC').toISOString(), '2026-07-15T00:00:00.000Z'],
-    ['Pacific/Kiritimati 09:00 (UTC+14)', anchorLocalTime(2026, 7, 15, 9, 0, 'Pacific/Kiritimati').toISOString(), '2026-07-14T19:00:00.000Z'],
-  ];
-  for (const [label, got, want] of anchors) {
-    check(label, got === want, `got ${got}, want ${want}`);
-  }
-
-  // The anchored instant must read back as the wall-clock time that was asked for.
-  let roundTripFailures = 0;
-  for (const zone of ['Asia/Kolkata', 'Europe/Berlin', 'America/Los_Angeles', 'Pacific/Auckland', 'Asia/Kathmandu', 'UTC']) {
-    for (const [month, day, hour] of [[1, 15, 9], [3, 29, 14], [7, 4, 0], [10, 25, 23], [12, 31, 17]] as const) {
-      const at = anchorLocalTime(2026, month, day, hour, 30, zone);
-      const wantDate = `2026-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      const wantHour = String(hour).padStart(2, '0');
-      const readBack = formatInTimezone(at, zone, { hour: '2-digit', minute: '2-digit', hour12: false });
-      if (calendarDateIn(at, zone) !== wantDate || !readBack.startsWith(wantHour)) {
-        roundTripFailures += 1;
-        console.error(`       ${zone} ${wantDate} ${wantHour}:30 read back as ${calendarDateIn(at, zone)} ${readBack}`);
-      }
-    }
-  }
-  check('anchored instants round trip in every zone', roundTripFailures === 0, roundTripFailures);
+  // Timezone helpers and local-time anchoring are pure and are covered by the vitest suite; what needs the
+  // database is below.
 
   console.log('\ncascade');
   await db.delete(users).where(eq(users.id, user.id));

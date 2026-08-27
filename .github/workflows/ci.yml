@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # A new push supersedes an in-flight run for the same ref.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Everything that needs neither a database nor the network. Kept separate so a
+  # type error or a failing unit test reports in well under a minute rather than
+  # waiting behind Postgres starting up.
+  static:
+    name: Typecheck and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+  # The integration checks, against a real PostgreSQL. Mocking the driver here
+  # would defeat the purpose: full-text search, array operators, upserts,
+  # cascades and FOR UPDATE SKIP LOCKED are exactly what is being verified.
+  integration:
+    name: Integration checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: personal_ai_agent
+        ports:
+          - 5432:5432
+        # Steps must not start before the server is accepting connections.
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/personal_ai_agent
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Apply migrations
+        run: npm run db:migrate
+
+      - name: Resolve a hostname to loopback
+        # One check fetches through a hostname rather than an IP literal,
+        # because Node skips DNS entirely for a literal — which is how a broken
+        # custom `lookup` went unnoticed once already.
+        run: echo "127.0.0.1 agent-smoke.test" | sudo tee -a /etc/hosts
+
+      - name: Integration checks
+        # No credentials are provided on purpose. Every check must set up the
+        # environment it needs rather than inheriting one, and a runner that
+        # exports nothing is what proves it: this caught a suite that passed
+        # locally only because GITHUB_TOKEN happened to be in the shell.
+        run: npm run smoke
+
+  build:
+    name: Production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # No DATABASE_URL and no ANTHROPIC_API_KEY on purpose: the build must not
+      # need either. Every secret is read lazily at request time, and this is
+      # what keeps that true.
+      - name: Build
+        run: npm run build

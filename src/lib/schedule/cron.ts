@@ -17,6 +17,14 @@ export class InvalidScheduleError extends Error {}
 /** Sanity floor on frequency: a per-minute schedule is a runaway, not a plan. */
 const MIN_INTERVAL_MS = 5 * 60 * 1000;
 
+/**
+ * How many missed firings to walk through before giving up and jumping to now.
+ *
+ * 4000 covers more than a decade of daily runs, which is far more than any real
+ * outage; beyond that the walk is not worth the iterations.
+ */
+const MAX_CATCHUP_STEPS = 4000;
+
 export interface CronCheck {
   /** Human-readable next few firings, so the agent can confirm what it set up. */
   upcoming: Date[];
@@ -105,13 +113,23 @@ export function skipMissed(
   now: Date = new Date(),
 ): { next: Date; skipped: number } {
   let candidate = nextOccurrence(expression, timezone, from);
-  let skipped = 0;
+  if (candidate > now) return { next: candidate, skipped: 0 };
 
-  // Bounded so a pathological expression cannot spin: 4000 iterations covers
-  // more than a decade of daily runs, and far more than any real outage.
-  while (candidate <= now && skipped < 4000) {
+  // Walking rather than jumping straight to `now` because the count of missed
+  // firings is worth reporting, and for a real outage the walk is short.
+  // Bounded so a pathological expression cannot spin.
+  let skipped = 0;
+  while (candidate <= now && skipped < MAX_CATCHUP_STEPS) {
     candidate = nextOccurrence(expression, timezone, candidate);
     skipped += 1;
+  }
+
+  if (candidate <= now) {
+    // A gap too large to walk — a cursor restored from an old backup, or a
+    // schedule that sat disabled for years. Resolving from `now` matters:
+    // returning a date still in the past would leave the schedule permanently
+    // overdue, re-firing on every single tick.
+    candidate = nextOccurrence(expression, timezone, now);
   }
 
   return { next: candidate, skipped };

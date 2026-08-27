@@ -5,13 +5,23 @@ import { env } from '@/lib/env';
 import * as schema from './schema';
 
 /**
- * A single pooled client per process.
+ * The database client, created on first use rather than on import.
  *
- * Next.js hot-reloads modules in development, which would otherwise leak a new
- * pool on every edit, so the client is cached on `globalThis`.
+ * Laziness is load-bearing, not a nicety. `next build` imports every route
+ * module to collect its configuration, so a connection opened at module scope
+ * makes `DATABASE_URL` a *build-time* requirement — the build fails in CI, and
+ * on any platform that builds an image before injecting runtime configuration.
+ * Deferring it means a secret is only needed when a request actually arrives.
+ *
+ * The instance is cached on `globalThis` because Next.js hot-reloads modules in
+ * development, which would otherwise leak a pool on every edit.
  */
+
+type Database = ReturnType<typeof createDrizzle>;
+
 const globalForDb = globalThis as unknown as {
   __agentSql?: postgres.Sql;
+  __agentDb?: Database;
 };
 
 function createClient(): postgres.Sql {
@@ -19,18 +29,63 @@ function createClient(): postgres.Sql {
     max: env.isProduction ? 10 : 3,
     idle_timeout: 20,
     connect_timeout: 15,
-    // Route timestamps through as-is; Drizzle handles the mapping.
     prepare: false,
   });
 }
 
-export const sql: postgres.Sql = globalForDb.__agentSql ?? createClient();
-
-if (!env.isProduction) {
-  globalForDb.__agentSql = sql;
+function createDrizzle(client: postgres.Sql) {
+  return drizzle(client, { schema, casing: 'snake_case' });
 }
 
-export const db = drizzle(sql, { schema, casing: 'snake_case' });
+function resolveClient(): postgres.Sql {
+  if (globalForDb.__agentSql) return globalForDb.__agentSql;
+  const client = createClient();
+  globalForDb.__agentSql = client;
+  return client;
+}
 
-export type Database = typeof db;
+function resolveDb(): Database {
+  if (globalForDb.__agentDb) return globalForDb.__agentDb;
+  const instance = createDrizzle(resolveClient());
+  globalForDb.__agentDb = instance;
+  return instance;
+}
+
+/**
+ * Forward property access to a lazily created instance.
+ *
+ * A proxy rather than a `getDb()` function so call sites stay `db.select(...)`.
+ * Methods are bound to the real instance, because drizzle's builders rely on
+ * their own `this`.
+ */
+function lazy<T extends object>(resolve: () => T): T {
+  return new Proxy({} as T, {
+    get(_target, property) {
+      const instance = resolve();
+      const value = Reflect.get(instance, property) as unknown;
+      return typeof value === 'function' ? value.bind(instance) : value;
+    },
+    has(_target, property) {
+      return Reflect.has(resolve(), property);
+    },
+    ownKeys() {
+      return Reflect.ownKeys(resolve());
+    },
+    getOwnPropertyDescriptor(_target, property) {
+      return Reflect.getOwnPropertyDescriptor(resolve(), property);
+    },
+  });
+}
+
+export const db: Database = lazy(resolveDb);
+
+/**
+ * The underlying client.
+ *
+ * Exported so a script can close the pool and let the process exit; application
+ * code should use `db`.
+ */
+export const sql: postgres.Sql = lazy(resolveClient) as postgres.Sql;
+
+export type { Database };
 export { schema };

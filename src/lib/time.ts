@@ -52,10 +52,13 @@ export function calendarDateIn(date: Date, timezone: string): string {
 export function describeRelative(target: Date, now = new Date()): string {
   const deltaMs = target.getTime() - now.getTime();
   const overdue = deltaMs < 0;
-  const absMinutes = Math.round(Math.abs(deltaMs) / 60_000);
+  const absMs = Math.abs(deltaMs);
+  const absMinutes = Math.round(absMs / 60_000);
 
   const phrase = (() => {
-    if (absMinutes < 1) return 'now';
+    // Checked on milliseconds, not on rounded minutes: rounding turns 30
+    // seconds into one minute, which made this branch unreachable.
+    if (absMs < 45_000) return 'now';
     if (absMinutes < 60) return `${absMinutes} minute${absMinutes === 1 ? '' : 's'}`;
     const hours = Math.round(absMinutes / 60);
     if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'}`;
