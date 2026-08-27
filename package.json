@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "smoke": "tsx scripts/smoke.ts",
+    "smoke": "tsx scripts/smoke.ts && tsx scripts/smoke-documents.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
@@ -20,10 +20,12 @@
     "@ai-sdk/react": "^4.0.86",
     "ai": "^7.0.83",
     "drizzle-orm": "^0.45.2",
+    "mammoth": "^1.12.1",
     "next": "^16.3.3",
     "postgres": "^3.4.9",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "unpdf": "^1.8.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {

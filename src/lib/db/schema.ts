@@ -153,6 +153,87 @@ export const tasks = pgTable(
 );
 
 /* -------------------------------------------------------------------------- */
+/* Documents                                                                  */
+/* -------------------------------------------------------------------------- */
+
+export const documentKind = pgEnum('document_kind', [
+  'text',
+  'markdown',
+  'json',
+  'csv',
+  'html',
+  'pdf',
+  'docx',
+  'unknown',
+]);
+
+export const documents = pgTable(
+  'documents',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text().notNull(),
+    kind: documentKind().notNull().default('text'),
+    mimeType: text(),
+    sizeBytes: integer().notNull().default(0),
+    /**
+     * Content hash of the original bytes. Re-uploading the same file replaces
+     * the existing row rather than accumulating duplicates.
+     */
+    contentHash: text().notNull(),
+    /** Extracted plain text. Kept whole so a document can be read end to end. */
+    content: text().notNull(),
+    /** Structural detail from parsing: page count, CSV columns, HTML title. */
+    metadata: jsonb().$type<Record<string, unknown>>().notNull().default({}),
+    /** Where it came from: `upload`, `local:<path>`, `email:<id>`. */
+    source: text().notNull().default('upload'),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('documents_user_created_idx').on(table.userId, table.createdAt.desc()),
+    // The same file uploaded twice is the same document.
+    uniqueIndex('documents_user_hash_unique').on(table.userId, table.contentHash),
+    index('documents_name_trgm_idx').using('gin', sql`${table.name} gin_trgm_ops`),
+  ],
+);
+
+/**
+ * Documents are chunked for retrieval.
+ *
+ * Searching whole documents returns too much to put in a prompt and ranks badly
+ * — a 40-page PDF matches almost any query. Chunks give the agent a passage it
+ * can quote, plus an offset so it can read around it.
+ */
+export const documentChunks = pgTable(
+  'document_chunks',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    documentId: uuid()
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** Position of this chunk within its document, starting at 0. */
+    ordinal: integer().notNull(),
+    content: text().notNull(),
+    /** Character offset into the document's full text, for reading around a hit. */
+    charOffset: integer().notNull().default(0),
+  },
+  (table) => [
+    uniqueIndex('document_chunks_document_ordinal_unique').on(table.documentId, table.ordinal),
+    index('document_chunks_content_fts_idx').using(
+      'gin',
+      sql`to_tsvector('english', ${table.content})`,
+    ),
+    index('document_chunks_user_idx').on(table.userId),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
 /* Observability                                                              */
 /* -------------------------------------------------------------------------- */
 
@@ -205,5 +286,8 @@ export type Memory = typeof memories.$inferSelect;
 export type NewMemory = typeof memories.$inferInsert;
 export type Task = typeof tasks.$inferSelect;
 export type NewTask = typeof tasks.$inferInsert;
+export type Document = typeof documents.$inferSelect;
+export type NewDocument = typeof documents.$inferInsert;
+export type DocumentChunk = typeof documentChunks.$inferSelect;
 export type MemoryKind = Memory['kind'];
 export type TaskStatus = Task['status'];
