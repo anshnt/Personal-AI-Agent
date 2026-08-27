@@ -1,5 +1,6 @@
 import type { ToolSet } from 'ai';
 
+import { connectorTools } from './connectors';
 import { documentTools } from './documents';
 import { emailTools } from './email';
 import { scheduleTools } from './schedule';
@@ -30,5 +31,6 @@ export function buildTools(context: AgentContext): ToolSet {
     ...emailTools(context),
     ...webTools(context),
     ...scheduleTools(context),
+    ...connectorTools(context),
   };
 }

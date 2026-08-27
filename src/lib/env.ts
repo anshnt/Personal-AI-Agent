@@ -165,6 +165,19 @@ export const env = {
     return optional('CRON_SECRET');
   },
 
+  /* ----------------------------------------------------------- connectors */
+
+  /**
+   * Extra connectors, as a JSON array.
+   *
+   * Lets an operator point the agent at their own API without a code change,
+   * while keeping the declarative shape: fixed host, named operations,
+   * validated parameters, credential never in the model's context.
+   */
+  get customConnectors(): string | undefined {
+    return optional('CUSTOM_CONNECTORS');
+  },
+
   get isProduction(): boolean {
     return process.env.NODE_ENV === 'production';
   },
