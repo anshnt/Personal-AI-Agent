@@ -43,6 +43,13 @@
       "when": 1787838312040,
       "tag": "0005_connector_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787838313040,
+      "tag": "0006_memory_embeddings",
+      "breakpoints": true
     }
   ]
 }

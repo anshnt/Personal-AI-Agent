@@ -10,6 +10,7 @@ import {
   remember,
   reviseMemory,
 } from '@/lib/memory/store';
+import { backfillEmbeddings, embeddingCoverage, semanticCapability } from '@/lib/memory/semantic';
 import { failure, instrument, type AgentContext } from './context';
 import { id, isoDateTime } from './schemas';
 
@@ -84,6 +85,9 @@ export function memoryTools(context: AgentContext) {
             content: memory.content,
             tags: memory.tags,
             relevance: Number(memory.score.toFixed(3)),
+            // Reported so the model can tell a paraphrase match from a literal
+            // one, which changes how much it should trust a loose hit.
+            matched_by: memory.matchedBy ?? 'text',
             recorded_at: memory.createdAt.toISOString(),
           })),
         };
@@ -161,6 +165,46 @@ export function memoryTools(context: AgentContext) {
       }),
     }),
 
+    memory_status: tool({
+      description:
+        "Report how memory search is working: whether semantic recall is available, and how many of the user's memories are indexed for it. Use it if search results seem to be missing things the user says you should know.",
+      inputSchema: z.object({}),
+      execute: instrument('memory_status', context, async () => {
+        const [capability, coverage] = await Promise.all([
+          semanticCapability(),
+          embeddingCoverage(context.user.id),
+        ]);
+
+        return {
+          ok: true as const,
+          text_search: 'always available',
+          semantic_search: capability.available ? 'available' : 'unavailable',
+          semantic_unavailable_because: capability.reason ?? null,
+          embedding_model: capability.model ?? null,
+          memories_total: coverage.total,
+          memories_usable_for_semantic_search: coverage.embedded,
+          memories_with_any_vector: coverage.withAnyEmbedding,
+          // Partial coverage is worth naming: semantic recall over a fraction of
+          // someone's memories behaves worse than none, because it looks like it
+          // worked.
+          note: coverageNote(capability.available, coverage),
+        };
+      }),
+    }),
+
+    index_memories: tool({
+      description:
+        'Catch up semantic indexing for memories that do not have it yet. Only useful when memory_status reports incomplete coverage. Does nothing when semantic search is unavailable.',
+      inputSchema: z.object({
+        limit: z.number().int().min(1).max(500).default(100),
+      }),
+      execute: instrument('index_memories', context, async (input) => {
+        const result = await backfillEmbeddings(context.user.id, input.limit);
+        if (result.reason && result.embedded === 0) return failure(result.reason);
+        return { ok: true as const, indexed: result.embedded, skipped: result.skipped };
+      }),
+    }),
+
     update_profile: tool({
       description:
         "Update the user's core identity or structured profile. Use it for their name, timezone, and durable attributes like role or working hours — not for one-off facts, which belong in remember_this.",
@@ -205,6 +249,21 @@ export function memoryTools(context: AgentContext) {
       }),
     }),
   };
+}
+
+function coverageNote(
+  semanticAvailable: boolean,
+  coverage: { total: number; embedded: number; withAnyEmbedding: number },
+): string | null {
+  if (!semanticAvailable) return null;
+  if (coverage.embedded >= coverage.total) return null;
+
+  // The two shortfalls have different causes and different fixes, so they are
+  // reported as different sentences.
+  if (coverage.withAnyEmbedding > coverage.embedded) {
+    return 'Some memories carry vectors from a previous embedding model, which are not comparable with the current one. index_memories will re-embed them.';
+  }
+  return 'Some memories are not indexed for semantic search yet, so meaning-based recall is incomplete. index_memories will catch them up.';
 }
 
 function isValidTimezone(timezone: string): boolean {
