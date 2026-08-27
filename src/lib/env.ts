@@ -131,6 +131,27 @@ export const env = {
     return optional('MAIL_LOCAL_DIR');
   },
 
+  /* ----------------------------------------------------------------- web */
+
+  /** Force a specific search backend. Otherwise whichever key is set wins. */
+  get searchProvider(): 'brave' | 'tavily' | 'searxng' | undefined {
+    const value = optional('SEARCH_PROVIDER');
+    return value === 'brave' || value === 'tavily' || value === 'searxng' ? value : undefined;
+  },
+
+  get braveSearchApiKey(): string | undefined {
+    return optional('BRAVE_SEARCH_API_KEY');
+  },
+
+  get tavilyApiKey(): string | undefined {
+    return optional('TAVILY_API_KEY');
+  },
+
+  /** Base URL of a self-hosted SearXNG instance. */
+  get searxngUrl(): string | undefined {
+    return optional('SEARXNG_URL');
+  },
+
   get isProduction(): boolean {
     return process.env.NODE_ENV === 'production';
   },

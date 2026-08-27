@@ -27,7 +27,7 @@ import {
   UNTRUSTED_OPEN,
   UNTRUSTED_CONTENT_POLICY,
   wrapUntrusted,
-} from '@/lib/email/untrusted';
+} from '@/lib/untrusted';
 import { MailError, type FetchOptions, type MailProvider, type RawMessage } from '@/lib/email/types';
 
 let failures = 0;

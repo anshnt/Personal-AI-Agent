@@ -22,6 +22,13 @@
       "when": 1787836609840,
       "tag": "0002_email",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787837332034,
+      "tag": "0003_web_cache",
+      "breakpoints": true
     }
   ]
 }

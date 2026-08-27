@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "smoke": "tsx scripts/smoke.ts && tsx scripts/smoke-documents.ts && tsx scripts/smoke-email.ts",
+    "smoke": "tsx scripts/smoke.ts && tsx scripts/smoke-documents.ts && tsx scripts/smoke-email.ts && tsx scripts/smoke-web.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
