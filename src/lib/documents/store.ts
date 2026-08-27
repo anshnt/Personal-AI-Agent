@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, lt, sql } from 'drizzle-orm';
 
 import { db } from '@/lib/db';
 import {
@@ -210,8 +210,8 @@ export async function getChunks(
       and(
         eq(documentChunks.userId, userId),
         eq(documentChunks.documentId, documentId),
-        sql`${documentChunks.ordinal} >= ${fromOrdinal}`,
-        sql`${documentChunks.ordinal} < ${fromOrdinal + count}`,
+        gte(documentChunks.ordinal, fromOrdinal),
+        lt(documentChunks.ordinal, fromOrdinal + count),
       ),
     )
     .orderBy(documentChunks.ordinal);

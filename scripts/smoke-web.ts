@@ -244,6 +244,34 @@ async function main(): Promise<void> {
     FetchFailedError,
   );
 
+  // The checks above reach the server by IP literal, where Node skips DNS
+  // entirely — so they never exercise the pinning path. This one goes through a
+  // hostname, which is how a real fetch works, and is what caught the custom
+  // `lookup` answering in the wrong shape.
+  const HOSTNAME = 'agent-smoke.test';
+  let hostnameResolves = true;
+  try {
+    const { lookup } = await import('node:dns/promises');
+    await lookup(HOSTNAME);
+  } catch {
+    hostnameResolves = false;
+  }
+
+  if (hostnameResolves) {
+    process.env.WEB_FETCH_ALLOW_HOSTS = `${HOSTNAME}:${port},127.0.0.1:${port}`;
+    const viaHostname = await safeFetch(`http://${HOSTNAME}:${port}/page`);
+    check('a fetch by hostname resolves, pins, and connects', viaHostname.status === 200, viaHostname.status);
+    check('the pinned fetch returns the real body', viaHostname.body.includes('High water at 06:12'), viaHostname.body.slice(0, 60));
+
+    const target = await validateTarget(`http://${HOSTNAME}:${port}/page`);
+    check('validation reports the resolved address', target.address === '127.0.0.1', target.address);
+
+    const redirectByHostname = await safeFetch(`http://${HOSTNAME}:${port}/redirect-ok`);
+    check('a redirect is re-resolved and re-pinned per hop', redirectByHostname.body.includes('High water'), redirectByHostname.finalUrl);
+  } else {
+    console.log(`  skip hostname pinning checks (${HOSTNAME} does not resolve here)`);
+  }
+
   console.log('\nreadable extraction');
   const extracted = extractReadable(
     '<html><head><title>Tide tables</title>' +

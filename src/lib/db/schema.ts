@@ -455,6 +455,35 @@ export const scheduleRuns = pgTable(
 );
 
 /* -------------------------------------------------------------------------- */
+/* Connector rate limiting                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Fixed-window call counters, per user and per connector.
+ *
+ * In the database rather than in memory because an agent loop can retry a
+ * failing call several times in one turn, and a serverless deployment has no
+ * shared memory to count in — an in-process counter resets on every cold start,
+ * which is no limit at all.
+ */
+export const connectorUsage = pgTable(
+  'connector_usage',
+  {
+    userId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    connector: text().notNull(),
+    /** Epoch-aligned, so every instance computes the same boundary. */
+    windowStart: timestamp({ withTimezone: true }).notNull(),
+    calls: integer().notNull().default(0),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.connector, table.windowStart] }),
+    index('connector_usage_window_idx').on(table.windowStart),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
 /* Observability                                                              */
 /* -------------------------------------------------------------------------- */
 
@@ -521,5 +550,6 @@ export type NewSchedule = typeof schedules.$inferInsert;
 export type ScheduleRun = typeof scheduleRuns.$inferSelect;
 export type ScheduleKind = Schedule['kind'];
 export type ScheduleStatus = Schedule['status'];
+export type ConnectorUsage = typeof connectorUsage.$inferSelect;
 export type MemoryKind = Memory['kind'];
 export type TaskStatus = Task['status'];

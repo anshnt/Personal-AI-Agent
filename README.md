@@ -18,10 +18,10 @@ Built on Next.js, TypeScript, PostgreSQL, and the AI SDK with tool calling.
 | **Reads your files** | Uploads and local files are parsed (txt, md, json, csv, html, pdf, docx), chunked, and indexed. The agent searches for a passage, then reads around it. |
 | **Searches the web** | Brave, Tavily, or a self-hosted SearXNG behind one interface, with caching, result de-duplication, and readable-text extraction. Every URL passes an SSRF guard before anything connects. |
 | **Schedules things** | One-off reminders and cron schedules in the user's timezone, DST included. A schedule can also be an *agent run* — a prompt executed unattended with the full tool set, so "every weekday at 8, check my mail and add anything urgent to my list" actually works. |
+| **Calls external APIs** | A declarative connector registry — weather, geocoding, and currency work with no API key at all. The model picks a named operation and never sees a credential or builds a URL. Extensible from configuration. |
 | **Shows its work** | Every tool call and its result is rendered inline, collapsed. Every execution is also written to an audit table. |
 
-External API connectors land in follow-up work; the tool layer is built to take
-them without changes to the agent loop.
+Every capability in the original brief is in place.
 
 ## Getting started
 
@@ -49,6 +49,10 @@ The rest have working defaults — identity (`DEFAULT_USER_EMAIL`,
 `DEFAULT_USER_NAME`, `DEFAULT_USER_TIMEZONE`), models (`AGENT_MODEL`,
 `UTILITY_MODEL`), and loop bounds (`AGENT_EFFORT`, `MAX_AGENT_STEPS`). See
 `.env.example` for the full list.
+
+External APIs need nothing to get started: weather, geocoding, and currency use
+services that require no key. `GITHUB_TOKEN` enables the GitHub connector, and
+`CUSTOM_CONNECTORS` adds your own APIs as JSON.
 
 Scheduling is off until `CRON_SECRET` is set. Then point any scheduler at
 `POST /api/cron` with the secret as a bearer token — Vercel Cron, a systemd
@@ -86,7 +90,7 @@ src/app/api/chat/route.ts
   │
   ├── streamText ───────────── model + tools, bounded by MAX_AGENT_STEPS
   │     └── tools ─────────── memory · tasks · time · documents
-  │                            email · web · schedule
+  │                            email · web · schedule · connectors
   │           └── each one audited to tool_executions
   │
   └── onFinish (after the user already has their answer)
@@ -108,6 +112,7 @@ src/
     api/email/               mail listing and sync trigger
     api/web/                 search, and cache purge
     api/cron/                fire due schedules (authenticated)
+    api/connectors/          list connectors, purge rate counters
     page.tsx, layout.tsx     the UI shell
   components/
     chat.tsx                 conversation view and composer
@@ -138,6 +143,10 @@ src/
     schedule/cron.ts         timezone-aware cron, misfire policy
     schedule/store.ts        crud, atomic claiming, run records
     schedule/runner.ts       executes due schedules through the agent
+    connectors/types.ts      the connector contract
+    connectors/registry.ts   built-ins, plus custom ones from config
+    connectors/invoke.ts     validate, limit, inject auth, call, redact
+    connectors/limiter.ts    persisted per-user rate limiting
     tasks/store.ts           task CRUD and querying
     time.ts                  timezone-correct date maths
     tools/                   the tool surface the model sees
@@ -148,6 +157,7 @@ scripts/
   smoke-email.ts             mail parsing, sync, search, injection framing
   smoke-web.ts               ssrf guard, extraction, cache, search
   smoke-schedule.ts          cron and dst, concurrency, misfires
+  smoke-connectors.ts        validation, write gating, limits, live calls
   fixtures/                  real pdf, docx, csv, html, and .eml messages
 ```
 
@@ -205,6 +215,32 @@ boundary and neither is retrievable.
 
 **Re-ingesting the same bytes replaces, it does not duplicate.** Documents are
 keyed by content hash per user, so syncing a folder twice is idempotent.
+
+**A generic `http_request` tool would have been the wrong design.** It would
+mean the model composing URLs (an SSRF surface), holding credentials in its
+context (a leak waiting to happen), and reaching any endpoint of any service it
+can name (unbounded blast radius from one prompt injection). Instead the model
+picks a *named operation* on a *declared connector* and supplies validated
+parameters. It never sees a credential, never builds a URL, and cannot reach a
+host or path that was not declared up front. Path placeholders are
+percent-encoded, so a parameter value cannot inject a path segment.
+
+**Writes need the user to have asked.** An operation marked `mutates` is refused
+unless the caller passes explicit confirmation, so a prompt injection in a web
+page or an email cannot make the agent post on the user's behalf. None of the
+keyless connectors expose a write at all.
+
+**Credentials are redacted out of responses, not just kept out of requests.**
+Some APIs echo the authenticated request back, headers included, and a
+query-scheme connector puts its key in a URL that error messages then quote.
+Response bodies are walked and the secret replaced before anything reaches the
+model or the audit log.
+
+**Rate limits live in the database.** An agent loop can retry a failing call
+several times in one turn, and a serverless deployment has no shared memory to
+count in — an in-process counter resets on every cold start, which is no limit at
+all. The increment is a single atomic statement, so two concurrent calls cannot
+both read the same count and both decide they are under the limit.
 
 **Two runners must never fire the same schedule.** Claiming uses
 `SELECT ... FOR UPDATE SKIP LOCKED` and advances `nextRunAt` inside the same
@@ -323,8 +359,8 @@ npm run build
 ```
 
 The smoke scripts run against real PostgreSQL, real files, real RFC 5322
-messages, and real local HTTP servers, which is the point. 339 checks cover
-full-text recall, array overlap filters, upsert paths, cascades,
+messages, real local HTTP servers, and live calls to a keyless third-party API,
+which is the point. 388 checks cover full-text recall, array overlap filters, upsert paths, cascades,
 cross-tenant isolation, local-time anchoring across DST transition days and
 45-minute offsets, PDF and DOCX extraction from actual bytes, CSV quoting rules,
 chunk boundary and overlap invariants, and every filesystem escape the sandbox is
@@ -339,10 +375,14 @@ to cloud metadata and to loopback, redirect loops, body-size caps without a
 directions, missed-firing skip, two concurrent claims never returning the same
 row, the failure-pause threshold, and resume-after-long-pause.
 
-Two bugs were found this way and are now covered: a lenient mail parser storing
+Three bugs were found this way and are now covered: a lenient mail parser storing
 junk that poisoned the sync cursor, and a `&&` array filter written as a raw SQL
 template, which binds a JS array as a scalar and made the task tag filter fail
-outright.
+outright. The third was the most interesting: the custom `lookup` used to pin an
+outbound socket to a validated address answered in the wrong callback shape, so
+**every fetch to a real hostname failed** — the web suite had missed it because
+its test server is reached by IP literal, where Node skips DNS entirely. There is
+now a check that goes through a hostname specifically.
 
 They delete all rows in the target database. Point them at a scratch one.
 

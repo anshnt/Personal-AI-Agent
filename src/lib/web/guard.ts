@@ -369,9 +369,7 @@ function requestOnce(
         },
         // This is the pin. The address was validated moments ago and DNS is not
         // consulted again, so the name cannot be re-pointed under us.
-        lookup: (_hostname, _lookupOptions, callback) => {
-          callback(null, target.address, target.family);
-        },
+        lookup: pinnedLookup(target.address, target.family),
         timeout: options.timeoutMs,
       },
       (response) => {
@@ -439,4 +437,30 @@ function readBody(
       reject(new FetchFailedError(`Read failed: ${error.message}`));
     });
   });
+}
+
+/**
+ * A `lookup` implementation that always answers with one pre-validated address.
+ *
+ * Node calls `lookup` with `{ all: true }`, in which case the callback takes an
+ * *array* of `{ address, family }`; the three-argument form is only used when
+ * `all` is false. Answering in the wrong shape fails with
+ * "Invalid IP address: undefined", so both are handled.
+ */
+function pinnedLookup(address: string, family: 4 | 6) {
+  return (
+    _hostname: string,
+    options: { all?: boolean } | number | undefined,
+    callback: (...args: never[]) => void,
+  ): void => {
+    const wantsAll = typeof options === 'object' && options !== null && options.all === true;
+    const done = callback as unknown as (
+      error: NodeJS.ErrnoException | null,
+      addresses: string | Array<{ address: string; family: number }>,
+      family?: number,
+    ) => void;
+
+    if (wantsAll) done(null, [{ address, family }]);
+    else done(null, address, family);
+  };
 }

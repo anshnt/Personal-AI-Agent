@@ -36,6 +36,13 @@
       "when": 1787837867087,
       "tag": "0004_schedules",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787838312040,
+      "tag": "0005_connector_usage",
+      "breakpoints": true
     }
   ]
 }
