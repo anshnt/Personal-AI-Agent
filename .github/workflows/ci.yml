@@ -82,6 +82,10 @@ jobs:
         run: echo "127.0.0.1 agent-smoke.test" | sudo tee -a /etc/hosts
 
       - name: Integration checks
+        # No credentials are provided on purpose. Every check must set up the
+        # environment it needs rather than inheriting one, and a runner that
+        # exports nothing is what proves it: this caught a suite that passed
+        # locally only because GITHUB_TOKEN happened to be in the shell.
         run: npm run smoke
 
   build:

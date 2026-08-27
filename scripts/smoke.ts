@@ -29,10 +29,12 @@ let failures = 0;
 function check(label: string, condition: boolean, detail?: unknown): void {
   if (condition) {
     console.log(`  ok   ${label}`);
-  } else {
-    failures += 1;
-    console.error(`  FAIL ${label}`, detail === undefined ? '' : detail);
+    return;
   }
+  failures += 1;
+  // One stream throughout: stdout and stderr interleave unpredictably in a CI
+  // log, which puts a failure under the wrong section heading.
+  console.log(`  FAIL ${label}`, detail === undefined ? '' : detail);
 }
 
 async function reset(): Promise<void> {

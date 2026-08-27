@@ -33,18 +33,21 @@ import { MailError, type FetchOptions, type MailProvider, type RawMessage } from
 let failures = 0;
 
 function check(label: string, condition: boolean, detail?: unknown): void {
-  if (condition) console.log(`  ok   ${label}`);
-  else {
-    failures += 1;
-    console.error(`  FAIL ${label}`, detail === undefined ? '' : detail);
+  if (condition) {
+    console.log(`  ok   ${label}`);
+    return;
   }
+  failures += 1;
+  // One stream throughout: stdout and stderr interleave unpredictably in a CI
+  // log, which puts a failure under the wrong section heading.
+  console.log(`  FAIL ${label}`, detail === undefined ? '' : detail);
 }
 
 async function expectRejection(label: string, run: () => Promise<unknown>): Promise<void> {
   try {
     const value = await run();
     failures += 1;
-    console.error(`  FAIL ${label} — expected a rejection, got`, value);
+    console.log(`  FAIL ${label} — expected a rejection, got`, value);
   } catch (error) {
     console.log(`  ok   ${label} (${(error instanceof Error ? error.message : '').slice(0, 60)})`);
   }
