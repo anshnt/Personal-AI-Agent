@@ -317,6 +317,39 @@ export const emails = pgTable(
 );
 
 /* -------------------------------------------------------------------------- */
+/* Web access cache                                                           */
+/* -------------------------------------------------------------------------- */
+
+export const webCacheKind = pgEnum('web_cache_kind', ['search', 'fetch']);
+
+/**
+ * Cache for outbound web calls.
+ *
+ * Search APIs are metered and page fetches are slow, and an agent re-asks the
+ * same question constantly across a multi-step turn. Keyed per user so one
+ * person's browsing is never served to another.
+ */
+export const webCache = pgTable(
+  'web_cache',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    kind: webCacheKind().notNull(),
+    /** The search query or the URL. */
+    cacheKey: text().notNull(),
+    payload: jsonb().$type<unknown>().notNull(),
+    expiresAt: timestamp({ withTimezone: true }).notNull(),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('web_cache_user_kind_key_unique').on(table.userId, table.kind, table.cacheKey),
+    index('web_cache_expires_idx').on(table.expiresAt),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
 /* Observability                                                              */
 /* -------------------------------------------------------------------------- */
 
@@ -377,5 +410,6 @@ export type NewEmailAccount = typeof emailAccounts.$inferInsert;
 export type Email = typeof emails.$inferSelect;
 export type NewEmail = typeof emails.$inferInsert;
 export type MailProviderKind = EmailAccount['provider'];
+export type WebCacheEntry = typeof webCache.$inferSelect;
 export type MemoryKind = Memory['kind'];
 export type TaskStatus = Task['status'];

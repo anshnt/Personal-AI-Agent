@@ -1,5 +1,5 @@
 import type { User } from '@/lib/db/schema';
-import { UNTRUSTED_CONTENT_POLICY } from '@/lib/email/untrusted';
+import { UNTRUSTED_CONTENT_POLICY } from '@/lib/untrusted';
 import type { RecalledMemory } from '@/lib/memory/store';
 
 /**

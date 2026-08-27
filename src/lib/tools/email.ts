@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 import { getEmail, getThread, mailboxStatus, searchEmail } from '@/lib/email/store';
 import { ensureConfiguredAccount, syncAllAccounts, type SyncResult } from '@/lib/email/sync';
-import { wrapUntrusted } from '@/lib/email/untrusted';
+import { wrapUntrusted } from '@/lib/untrusted';
 import { describeRelative, formatInTimezone } from '@/lib/time';
 import { failure, instrument, type AgentContext } from './context';
 import { id, isoDateTime } from './schemas';
