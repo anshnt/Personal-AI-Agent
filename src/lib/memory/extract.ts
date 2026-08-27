@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { MEMORY_EXTRACTION_PROMPT } from '@/lib/ai/prompts';
 import { utilityModel, utilityProviderOptions } from '@/lib/ai/provider';
 import type { Memory } from '@/lib/db/schema';
+import { backfillEmbeddings } from './semantic';
 import { recall, remember } from './store';
 
 const extractedMemory = z.object({
@@ -83,6 +84,17 @@ export async function extractAndStoreMemories(input: ExtractionInput): Promise<M
           source: `conversation:${input.conversationId}`,
         }),
       );
+    }
+
+    if (stored.length > 0) {
+      // Embedded here rather than in `remember`, for two reasons: this already
+      // runs after the response is delivered, so latency does not reach the
+      // user; and a batch of new memories is one provider call instead of
+      // several. It is a no-op when semantic recall is not configured.
+      const result = await backfillEmbeddings(input.userId, stored.length + 5);
+      if (result.reason && result.skipped > 0) {
+        console.warn('[memory] embeddings were skipped:', result.reason);
+      }
     }
 
     return stored;

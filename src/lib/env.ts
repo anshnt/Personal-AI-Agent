@@ -178,6 +178,30 @@ export const env = {
     return optional('CUSTOM_CONNECTORS');
   },
 
+  /* ---------------------------------------------------------- embeddings */
+
+  /**
+   * Voyage is the default embedding provider: Anthropic publishes no embedding
+   * model, and Voyage is their recommended partner. Optional — with no provider
+   * configured, memory recall stays lexical.
+   */
+  get voyageApiKey(): string | undefined {
+    return optional('VOYAGE_API_KEY');
+  },
+
+  get voyageEmbeddingModel(): string {
+    return optional('VOYAGE_EMBEDDING_MODEL') ?? 'voyage-3.5';
+  },
+
+  /** OpenAI as an alternative, for a deployment that already has a key. */
+  get openAiApiKey(): string | undefined {
+    return optional('OPENAI_API_KEY');
+  },
+
+  get openAiEmbeddingModel(): string {
+    return optional('OPENAI_EMBEDDING_MODEL') ?? 'text-embedding-3-small';
+  },
+
   get isProduction(): boolean {
     return process.env.NODE_ENV === 'production';
   },

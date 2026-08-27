@@ -52,18 +52,33 @@ function resolveDb(): Database {
 }
 
 /**
- * Forward property access to a lazily created instance.
+ * Forward access to a lazily created instance.
  *
  * A proxy rather than a `getDb()` function so call sites stay `db.select(...)`.
  * Methods are bound to the real instance, because drizzle's builders rely on
  * their own `this`.
+ *
+ * The target is a function and there is an `apply` trap because postgres.js's
+ * `sql` is itself callable — it is a tagged-template function, so
+ * `sql\`select 1\`` has to work, not just `sql.end()`. A proxy over a plain
+ * object is not callable, and the failure is a bare "client is not a function"
+ * at the first raw query.
  */
 function lazy<T extends object>(resolve: () => T): T {
-  return new Proxy({} as T, {
+  const target = function lazyTarget() {} as unknown as T;
+
+  return new Proxy(target, {
+    apply(_target, thisArg: unknown, args: unknown[]) {
+      const instance = resolve() as unknown as (...values: unknown[]) => unknown;
+      if (typeof instance !== 'function') {
+        throw new TypeError('This lazy value is not callable');
+      }
+      return Reflect.apply(instance, thisArg, args);
+    },
     get(_target, property) {
       const instance = resolve();
       const value = Reflect.get(instance, property) as unknown;
-      return typeof value === 'function' ? value.bind(instance) : value;
+      return typeof value === 'function' ? (value as () => unknown).bind(instance) : value;
     },
     has(_target, property) {
       return Reflect.has(resolve(), property);
@@ -72,7 +87,10 @@ function lazy<T extends object>(resolve: () => T): T {
       return Reflect.ownKeys(resolve());
     },
     getOwnPropertyDescriptor(_target, property) {
-      return Reflect.getOwnPropertyDescriptor(resolve(), property);
+      const descriptor = Reflect.getOwnPropertyDescriptor(resolve(), property);
+      // A proxy may not report a property as non-configurable when the target
+      // does not have it, so the descriptor is relaxed.
+      return descriptor === undefined ? undefined : { ...descriptor, configurable: true };
     },
   });
 }

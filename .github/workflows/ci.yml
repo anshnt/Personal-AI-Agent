@@ -81,6 +81,22 @@ jobs:
         # custom `lookup` went unnoticed once already.
         run: echo "127.0.0.1 agent-smoke.test" | sudo tee -a /etc/hosts
 
+      - name: Verify the migrations apply without pgvector
+        # Semantic memory is optional, and the migration that adds it is
+        # conditional. The Postgres service image ships pgvector, so the only way
+        # to prove the no-extension path still works is a database where the
+        # extension is deliberately not created — which is what this checks:
+        # every table present, the embedding column absent.
+        run: |
+          psql "$DATABASE_URL" -c 'CREATE DATABASE agent_no_vector;'
+          DATABASE_URL="${DATABASE_URL%/*}/agent_no_vector" npm run db:migrate
+          tables=$(psql "${DATABASE_URL%/*}/agent_no_vector" -tAc \
+            "select count(*) from pg_tables where schemaname='public';")
+          echo "tables created without pgvector: $tables"
+          test "$tables" -ge 15
+        env:
+          PGPASSWORD: postgres
+
       - name: Integration checks
         # No credentials are provided on purpose. Every check must set up the
         # environment it needs rather than inheriting one, and a runner that

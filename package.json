@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "smoke": "tsx scripts/smoke.ts && tsx scripts/smoke-documents.ts && tsx scripts/smoke-email.ts && tsx scripts/smoke-web.ts && tsx scripts/smoke-schedule.ts && tsx scripts/smoke-connectors.ts",
+    "smoke": "tsx scripts/smoke.ts && tsx scripts/smoke-documents.ts && tsx scripts/smoke-email.ts && tsx scripts/smoke-web.ts && tsx scripts/smoke-schedule.ts && tsx scripts/smoke-connectors.ts && tsx scripts/smoke-semantic.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",

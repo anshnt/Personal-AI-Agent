@@ -1,7 +1,7 @@
 # Personal AI Agent
 
 [![CI](https://github.com/anshnt/Personal-AI-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/anshnt/Personal-AI-Agent/actions/workflows/ci.yml)
-[![checks](https://img.shields.io/badge/checks-479-brightgreen)](#verification)
+[![checks](https://img.shields.io/badge/checks-539-brightgreen)](#verification)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=nextdotjs)](https://nextjs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-14%2B-4169e1?logo=postgresql&logoColor=white)](https://www.postgresql.org)
@@ -18,7 +18,7 @@ Built on Next.js, TypeScript, PostgreSQL, and the AI SDK with tool calling.
 
 | Capability | How it works |
 | --- | --- |
-| **Remembers you** | Durable memory in Postgres, classified as facts, preferences, episodes, and standing directives. Relevant memories are recalled into the system prompt on every turn. |
+| **Remembers you** | Durable memory in Postgres, classified as facts, preferences, episodes, and standing directives. Relevant memories are recalled into the system prompt on every turn — by full-text search, and by meaning too where an embedding provider is configured. |
 | **Learns without being told** | After each exchange a background pass mines the turn for anything worth keeping and writes it away. No "remember this" required. |
 | **Manages tasks** | Full task store with priorities, tags, due dates, and status. The agent creates and updates them as a side effect of ordinary conversation. |
 | **Gets dates right** | A deterministic date resolver, so "next Tuesday at 9" becomes a real timestamp in your timezone instead of something the model guessed. |
@@ -57,6 +57,10 @@ The rest have working defaults — identity (`DEFAULT_USER_EMAIL`,
 `DEFAULT_USER_NAME`, `DEFAULT_USER_TIMEZONE`), models (`AGENT_MODEL`,
 `UTILITY_MODEL`), and loop bounds (`AGENT_EFFORT`, `MAX_AGENT_STEPS`). See
 `.env.example` for the full list.
+
+Semantic memory recall is off until an embedding provider is set. It needs
+pgvector *and* a `VOYAGE_API_KEY` or `OPENAI_API_KEY`; without either, recall
+stays full-text and nothing else changes.
 
 External APIs need nothing to get started: weather, geocoding, and currency use
 services that require no key. `GITHUB_TOKEN` enables the GitHub connector, and
@@ -256,6 +260,8 @@ src/
     db/users.ts              identity resolution
     memory/store.ts          write, recall, revise, forget
     memory/extract.ts        background memory mining
+    memory/embeddings.ts     voyage and openai, behind one interface
+    memory/semantic.ts       capability detection, vector search, backfill
     documents/parse.ts       file formats to plain text
     documents/chunk.ts       retrieval chunking with overlap
     documents/store.ts       ingest, index, search, read
@@ -290,6 +296,7 @@ scripts/
   smoke-web.ts               ssrf guard, extraction, cache, search
   smoke-schedule.ts          cron and dst, concurrency, misfires
   smoke-connectors.ts        validation, write gating, limits, live calls
+  smoke-semantic.ts          pgvector, cosine ordering, fusion, degradation
   fixtures/                  real pdf, docx, csv, html, and .eml messages
 ```
 
@@ -304,6 +311,32 @@ the smoke checks.
 the wrong failure mode — the model can usually recover from being told "that
 lookup failed". `instrument()` in `lib/tools/context.ts` catches, returns a
 structured `{ ok: false, error }`, and writes an audit row either way.
+
+**Text search and vector search fail in opposite directions, so recall runs
+both.** Text misses a paraphrase — "where do they work" shares no stem with
+"employed at a logistics startup". Vector search returns something for every
+query, including queries with no real answer, and it cannot match an identifier
+like an order number. Running both gets the union.
+
+They are fused by **reciprocal rank**, not by blending the scores. A
+`ts_rank_cd` of 0.2 and a cosine similarity of 0.2 mean entirely different
+things, so averaging them is arithmetic on incommensurable units. Ranks are
+comparable by construction.
+
+**The whole feature is optional, and the optionality is load-bearing.** It needs
+pgvector *and* an embedding provider — and Anthropic publishes no embedding
+model, so that means a second vendor. Rather than make either a requirement:
+the migration is wrapped in a conditional that creates the column only where the
+extension exists, capability is detected at runtime, and recall falls through to
+lexical when anything is missing. CI verifies the migration on a database with
+pgvector deliberately absent, and the degradation checks run in both
+environments — a claim only checked on the happy path is not checked.
+
+**A vector from a different model is not comparable with one from the current
+model.** Recall filters on the stored model name, so switching provider degrades
+to lexical until a re-index rather than returning confident nonsense. Coverage
+reports usable and merely-present vectors separately, because "not indexed yet"
+and "indexed by the old model" are different states with different fixes.
 
 **Recall matches on any term, not all of them.** The obvious choice,
 `websearch_to_tsquery`, ANDs every word, so recalling "running marathon training"
@@ -486,25 +519,26 @@ by user and every query filters on it. Adding real auth means changing
 
 ```bash
 npm run typecheck
-npm test           # 224 unit tests, ~2s, no database needed
-npm run smoke      # 255 integration checks; needs DATABASE_URL
+npm test           # 244 unit tests, ~2s, no database needed
+npm run smoke      # 295 integration checks; needs DATABASE_URL
 npm run build
 ```
 
 ```mermaid
 pie showData
-    title Where the 479 checks are
+    title Where the 539 checks are
+    "Memory, incl. semantic recall" : 142
     "Web and the SSRF guard" : 107
     "Documents and parsing" : 83
-    "Memory, tasks, time" : 82
     "Scheduling" : 79
     "Email" : 71
     "External API connectors" : 57
 ```
 
-The distribution is not accidental: the three areas that touch the outside world
-— outbound HTTP, file parsing, and mail — carry the most checks, because that is
-where a mistake is least recoverable.
+The distribution is not accidental. Memory carries the most because it is the
+feature everything else feeds, and the areas that touch the outside world —
+outbound HTTP, file parsing, mail — come next, because that is where a mistake is
+least recoverable.
 
 Two layers, split by what they need:
 
@@ -526,7 +560,7 @@ service container as another, and the production build as a third — the build
 deliberately without `DATABASE_URL` or `ANTHROPIC_API_KEY`, which is what keeps
 secrets lazily read rather than build-time requirements.
 
-479 checks in total. They cover full-text recall, array overlap filters, upsert paths, cascades,
+539 checks in total. They cover full-text recall, array overlap filters, upsert paths, cascades,
 cross-tenant isolation, local-time anchoring across DST transition days and
 45-minute offsets, PDF and DOCX extraction from actual bytes, CSV quoting rules,
 chunk boundary and overlap invariants, and every filesystem escape the sandbox is

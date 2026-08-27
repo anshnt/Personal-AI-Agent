@@ -1,6 +1,7 @@
 import { and, arrayOverlaps, desc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
 
 import { db } from '@/lib/db';
+import { semanticSearch, type SemanticHit } from './semantic';
 import { memories, type Memory, type MemoryKind } from '@/lib/db/schema';
 
 export interface RememberInput {
@@ -38,6 +39,10 @@ export interface RecalledMemory {
    * matched, not that the memory happened to be an important one.
    */
   lexical: number;
+  /** Cosine similarity in 0..1, or 0 when semantic recall did not find it. */
+  semantic?: number;
+  /** Which index surfaced this memory. Useful for explaining a recall. */
+  matchedBy?: 'text' | 'meaning' | 'both';
 }
 
 const DEFAULT_RECALL_LIMIT = 12;
@@ -158,12 +163,12 @@ export async function remember(input: RememberInput): Promise<Memory> {
 }
 
 /**
- * Retrieve the memories most relevant to a query.
+ * Lexical recall: full-text match, blended with importance and recency.
  *
  * With no query this returns the highest-signal memories by importance and
  * recency, which is what the system prompt needs on a cold conversation.
  */
-export async function recall(options: RecallOptions): Promise<RecalledMemory[]> {
+export async function lexicalRecall(options: RecallOptions): Promise<RecalledMemory[]> {
   const limit = Math.min(Math.max(options.limit ?? DEFAULT_RECALL_LIMIT, 1), MAX_RECALL_LIMIT);
   // A query of nothing but stop words or punctuation reduces to no terms, in
   // which case the importance-ordered path is the honest answer.
@@ -238,6 +243,140 @@ export async function recall(options: RecallOptions): Promise<RecalledMemory[]> 
     score: clamp01(row.score),
     lexical: clamp01(row.lexical),
   }));
+}
+
+/* -------------------------------------------------------------------------- */
+/* Hybrid recall                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Rank constant for reciprocal rank fusion.
+ *
+ * The conventional value. It damps the difference between the top few positions
+ * so a single index cannot dominate on the strength of its first hit alone.
+ */
+const RRF_K = 60;
+
+/**
+ * Retrieve the memories most relevant to a query, using both indexes.
+ *
+ * Text search and vector search fail in opposite directions. Text misses a
+ * paraphrase — "where do they work" against "employed at a logistics startup"
+ * shares no stem. Vector search returns something for every query, including
+ * queries with no real answer, and it cannot match an identifier like an order
+ * number. Running both and fusing gets the union.
+ *
+ * Fusion is by reciprocal rank rather than by blending the scores. The two
+ * numbers are not comparable — a `ts_rank_cd` of 0.2 and a cosine similarity of
+ * 0.2 mean entirely different things — so blending them is arithmetic on
+ * incommensurable units. Ranks are comparable by construction.
+ *
+ * Falls back silently to lexical when semantic recall is unavailable, which is
+ * the default: it needs both pgvector and an embedding provider.
+ */
+export async function recall(options: RecallOptions): Promise<RecalledMemory[]> {
+  const limit = Math.min(Math.max(options.limit ?? DEFAULT_RECALL_LIMIT, 1), MAX_RECALL_LIMIT);
+
+  // Ask each index for more than the caller wants, so fusion has room to
+  // reorder rather than just interleaving two already-truncated lists.
+  const perIndex = Math.min(limit * 3, MAX_RECALL_LIMIT);
+
+  const lexical = await lexicalRecall({ ...options, limit: perIndex });
+
+  const query = (options.query ?? '').trim();
+  if (query.length === 0) {
+    // No query means no semantic side; the importance-ordered list is the answer.
+    return lexical.slice(0, limit);
+  }
+
+  const semantic = await semanticSearch({
+    userId: options.userId,
+    query,
+    kinds: options.kinds,
+    limit: perIndex,
+  });
+
+  if (semantic.length === 0) {
+    return lexical.slice(0, limit).map((memory) => ({ ...memory, matchedBy: 'text' as const }));
+  }
+
+  return fuse(options, lexical, semantic, limit);
+}
+
+/**
+ * Combine two rankings.
+ *
+ * Exported as `fuseForTests` below so the ordering logic can be checked with a
+ * stub semantic ranking, without an embedding provider.
+ */
+async function fuse(
+  options: RecallOptions,
+  lexical: RecalledMemory[],
+  semantic: SemanticHit[],
+  limit: number,
+): Promise<RecalledMemory[]> {
+  const byId = new Map<string, RecalledMemory>();
+  for (const memory of lexical) byId.set(memory.id, memory);
+
+  // A memory only the vector index found still has to be loaded and filtered:
+  // the semantic query does not apply the caller's tag filter.
+  const missing = semantic.map((hit) => hit.id).filter((id) => !byId.has(id));
+  if (missing.length > 0) {
+    const filters = [liveMemory(options.userId), inArray(memories.id, missing)];
+    if (options.kinds && options.kinds.length > 0) {
+      filters.push(inArray(memories.kind, options.kinds));
+    }
+    if (options.tags && options.tags.length > 0) {
+      filters.push(arrayOverlaps(memories.tags, mergeTags([], options.tags)));
+    }
+
+    const rows = await db
+      .select({
+        id: memories.id,
+        kind: memories.kind,
+        content: memories.content,
+        tags: memories.tags,
+        importance: memories.importance,
+        createdAt: memories.createdAt,
+      })
+      .from(memories)
+      .where(and(...filters));
+
+    for (const row of rows) {
+      byId.set(row.id, { ...row, score: 0, lexical: 0 });
+    }
+  }
+
+  const lexicalRank = new Map(lexical.map((memory, index) => [memory.id, index + 1]));
+  const semanticRank = new Map(semantic.map((hit, index) => [hit.id, index + 1]));
+  const similarity = new Map(semantic.map((hit) => [hit.id, hit.similarity]));
+
+  const fused = [...byId.values()]
+    .map((memory) => {
+      const lexicalPosition = lexicalRank.get(memory.id);
+      const semanticPosition = semanticRank.get(memory.id);
+
+      const rrf =
+        (lexicalPosition ? 1 / (RRF_K + lexicalPosition) : 0) +
+        (semanticPosition ? 1 / (RRF_K + semanticPosition) : 0);
+
+      const matchedBy =
+        lexicalPosition && semanticPosition ? 'both' : semanticPosition ? 'meaning' : 'text';
+
+      return {
+        ...memory,
+        // Normalised so `score` stays in 0..1 and comparable with the
+        // lexical-only path: two first places is the maximum.
+        score: clamp01(rrf / (2 / (RRF_K + 1))),
+        semantic: similarity.get(memory.id) ?? 0,
+        matchedBy: matchedBy as 'text' | 'meaning' | 'both',
+      };
+    })
+    .sort((left, right) => right.score - left.score)
+    .slice(0, limit);
+
+  await touch(fused.map((memory) => memory.id));
+  return fused;
 }
 
 /** Record that memories were surfaced, so unused ones can be pruned later. */
@@ -339,3 +478,11 @@ export async function forgetMatching(userId: string, query: string): Promise<Mem
     )
     .returning();
 }
+
+/**
+ * Fusion, exposed for tests.
+ *
+ * The ordering logic is the part of hybrid recall most likely to be subtly
+ * wrong, and it is the part that does not need a provider to exercise.
+ */
+export const fuseForTests = fuse;
