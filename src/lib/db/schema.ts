@@ -234,6 +234,89 @@ export const documentChunks = pgTable(
 );
 
 /* -------------------------------------------------------------------------- */
+/* Email                                                                      */
+/* -------------------------------------------------------------------------- */
+
+export const mailProvider = pgEnum('mail_provider', ['imap', 'local']);
+
+export const emailAccounts = pgTable(
+  'email_accounts',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    provider: mailProvider().notNull(),
+    /** The mailbox address, for display and for "who is this from" reasoning. */
+    address: text().notNull(),
+    /**
+     * Non-secret connection settings: host, port, mailbox name, directory path.
+     *
+     * Credentials deliberately do not live here. They are read from the
+     * environment at connect time, so a database dump never carries them.
+     */
+    config: jsonb().$type<Record<string, unknown>>().notNull().default({}),
+    /** Cursor for incremental sync: the newest message already stored. */
+    syncedThrough: timestamp({ withTimezone: true }),
+    lastSyncedAt: timestamp({ withTimezone: true }),
+    lastSyncError: text(),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex('email_accounts_user_address_unique').on(table.userId, table.address)],
+);
+
+export const emails = pgTable(
+  'emails',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    accountId: uuid()
+      .notNull()
+      .references(() => emailAccounts.id, { onDelete: 'cascade' }),
+    /**
+     * RFC 5322 Message-ID, or a hash of the raw bytes when the header is absent.
+     * This is the dedupe key: re-syncing a mailbox must not duplicate messages.
+     */
+    messageId: text().notNull(),
+    /** Provider-native id (IMAP UID, filename), for fetching the original. */
+    externalId: text(),
+    /** References/In-Reply-To root, so a conversation can be grouped. */
+    threadKey: text(),
+    fromAddress: text().notNull(),
+    fromName: text(),
+    toAddresses: text().array().notNull().default(sql`ARRAY[]::text[]`),
+    ccAddresses: text().array().notNull().default(sql`ARRAY[]::text[]`),
+    subject: text().notNull().default(''),
+    /** Plain text body. HTML-only mail is converted before storage. */
+    bodyText: text().notNull().default(''),
+    /** First line or so, for listings that should not carry a whole body. */
+    snippet: text().notNull().default(''),
+    attachmentNames: text().array().notNull().default(sql`ARRAY[]::text[]`),
+    labels: text().array().notNull().default(sql`ARRAY[]::text[]`),
+    receivedAt: timestamp({ withTimezone: true }).notNull(),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('emails_account_message_unique').on(table.accountId, table.messageId),
+    index('emails_user_received_idx').on(table.userId, table.receivedAt.desc()),
+    index('emails_user_from_idx').on(table.userId, table.fromAddress),
+    index('emails_thread_idx').on(table.userId, table.threadKey),
+    // Subject is weighted above the body so a search for a subject line ranks it
+    // first, rather than losing to a message that mentions the words in passing.
+    index('emails_search_idx').using(
+      'gin',
+      sql`(
+        setweight(to_tsvector('english', coalesce(${table.subject}, '')), 'A') ||
+        setweight(to_tsvector('english', coalesce(${table.fromName}, '') || ' ' || ${table.fromAddress}), 'B') ||
+        setweight(to_tsvector('english', coalesce(${table.bodyText}, '')), 'C')
+      )`,
+    ),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
 /* Observability                                                              */
 /* -------------------------------------------------------------------------- */
 
@@ -289,5 +372,10 @@ export type NewTask = typeof tasks.$inferInsert;
 export type Document = typeof documents.$inferSelect;
 export type NewDocument = typeof documents.$inferInsert;
 export type DocumentChunk = typeof documentChunks.$inferSelect;
+export type EmailAccount = typeof emailAccounts.$inferSelect;
+export type NewEmailAccount = typeof emailAccounts.$inferInsert;
+export type Email = typeof emails.$inferSelect;
+export type NewEmail = typeof emails.$inferInsert;
+export type MailProviderKind = EmailAccount['provider'];
 export type MemoryKind = Memory['kind'];
 export type TaskStatus = Task['status'];

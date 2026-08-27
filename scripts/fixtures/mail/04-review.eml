@@ -1,0 +1,22 @@
+Message-ID: <review-551@corp.example>
+From: Priya Raman <priya@corp.example>
+To: ansh@localhost
+Cc: team@corp.example, ops@corp.example
+Subject: Design review moved to Room 4
+Date: Wed, 19 Aug 2026 14:30:00 +0000
+Content-Type: multipart/mixed; boundary="BOUND-77"
+MIME-Version: 1.0
+
+--BOUND-77
+Content-Type: text/plain; charset=utf-8
+
+Slides for the review are attached. The venue changed to Room 4.
+
+--BOUND-77
+Content-Type: application/pdf; name="deck.pdf"
+Content-Disposition: attachment; filename="deck.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJSVFT0YK
+
+--BOUND-77--

@@ -1,4 +1,5 @@
 import type { User } from '@/lib/db/schema';
+import { UNTRUSTED_CONTENT_POLICY } from '@/lib/email/untrusted';
 import type { RecalledMemory } from '@/lib/memory/store';
 
 /**
@@ -96,7 +97,9 @@ function renderMemories(memories: RecalledMemory[]): string {
  * identity, then the volatile recall block and timestamp last.
  */
 export function buildSystemPrompt(context: PromptContext): string {
-  const sections: string[] = [CORE_INSTRUCTIONS];
+  // Both of these are frozen constants, and they come first, so the cacheable
+  // prefix is as long as possible.
+  const sections: string[] = [CORE_INSTRUCTIONS, UNTRUSTED_CONTENT_POLICY];
 
   const identity: string[] = [];
   identity.push(`- name: ${context.user.name ?? 'not known yet — ask if it comes up naturally'}`);

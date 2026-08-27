@@ -1,0 +1,9 @@
+Message-ID: <news-2026-34@letters.example>
+From: "Weekly Rust" <hello@letters.example>
+To: ansh@localhost
+Subject: Issue 34: async traits land
+Date: Tue, 18 Aug 2026 06:00:00 +0000
+Content-Type: text/html; charset=utf-8
+MIME-Version: 1.0
+
+<html><body><h1>Issue&nbsp;34</h1><style>b{color:#000}</style><script>track()</script><p>Async traits are stable in the new release.</p><ul><li>Benchmarks improved by 12%</li></ul></body></html>

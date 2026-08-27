@@ -15,6 +15,13 @@
       "when": 1787835923105,
       "tag": "0001_documents",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787836609840,
+      "tag": "0002_email",
+      "breakpoints": true
     }
   ]
 }
