@@ -80,6 +80,16 @@ export const env = {
     return optional('DEFAULT_USER_TIMEZONE') ?? 'UTC';
   },
 
+  /**
+   * Directory the agent may read files from.
+   *
+   * Unset means local file access is off. There is deliberately no default:
+   * filesystem access for a model is opt-in, never inherited.
+   */
+  get filesDir(): string | undefined {
+    return optional('AGENT_FILES_DIR');
+  },
+
   get isProduction(): boolean {
     return process.env.NODE_ENV === 'production';
   },

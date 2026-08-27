@@ -1,5 +1,6 @@
 import type { ToolSet } from 'ai';
 
+import { documentTools } from './documents';
 import { memoryTools } from './memory';
 import { taskTools } from './tasks';
 import { timeTools } from './time';
@@ -22,5 +23,6 @@ export function buildTools(context: AgentContext): ToolSet {
     ...timeTools(context),
     ...memoryTools(context),
     ...taskTools(context),
+    ...documentTools(context),
   };
 }
