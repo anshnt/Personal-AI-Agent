@@ -25,6 +25,15 @@ import {
 } from '@/lib/connectors/registry';
 import { ConnectorError } from '@/lib/connectors/types';
 
+/**
+ * The credential the suite installs.
+ *
+ * A named constant so the leak checks below assert against the value that is
+ * actually set. Written out separately, the assertion silently tests for a
+ * string nothing ever produced, and passes whether or not the credential leaks.
+ */
+const FAKE_GITHUB_TOKEN = 'ghp_fake_token_for_checks_only';
+
 let failures = 0;
 
 function check(label: string, condition: boolean, detail?: unknown): void {
@@ -69,7 +78,7 @@ async function main(): Promise<void> {
   // The suite sets every credential it needs rather than inheriting whatever
   // the shell happens to export. Depending on ambient environment is how these
   // checks passed locally and failed in CI.
-  process.env.GITHUB_TOKEN = 'ghp_fake_token_for_checks_only';
+  process.env.GITHUB_TOKEN = FAKE_GITHUB_TOKEN;
   delete process.env.CUSTOM_CONNECTORS;
   delete process.env.HOUSE_TOKEN;
   resetRegistry();
@@ -318,9 +327,27 @@ async function main(): Promise<void> {
     })),
   );
   check(
-    'the registry surface names the env var but never holds a value',
-    serialisedRegistry.includes('GITHUB_TOKEN') && !serialisedRegistry.includes('ghp_thisisafaketokenforchecks'),
+    'the registry surface names the env var, not its value',
+    serialisedRegistry.includes('GITHUB_TOKEN') && !serialisedRegistry.includes(FAKE_GITHUB_TOKEN),
+    serialisedRegistry.includes(FAKE_GITHUB_TOKEN) ? 'the token leaked into the registry surface' : undefined,
   );
+
+  // The same property, on the path that actually carries a credential: an error
+  // message quoting an upstream response must not quote the key with it.
+  const leaked = await invoke({
+    userId: user.id,
+    connector: 'github',
+    operation: 'get_issue',
+    // A repository that does not exist, so GitHub returns 404 and the failure
+    // message is built from its response.
+    params: { owner: 'anshnt', repo: 'definitely-not-a-real-repo-x9f2', number: 1 },
+  }).catch((error: unknown) => (error instanceof Error ? error.message : String(error)));
+
+  if (typeof leaked === 'string') {
+    check('a failure message does not carry the credential', !leaked.includes(FAKE_GITHUB_TOKEN), leaked.slice(0, 120));
+  } else {
+    console.log('  skip credential-in-error check (the call unexpectedly succeeded)');
+  }
 
   console.log('\ncascade');
   await db.delete(users).where(eq(users.id, user.id));
