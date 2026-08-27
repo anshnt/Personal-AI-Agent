@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "smoke": "tsx scripts/smoke.ts && tsx scripts/smoke-documents.ts",
+    "smoke": "tsx scripts/smoke.ts && tsx scripts/smoke-documents.ts && tsx scripts/smoke-email.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
@@ -20,6 +20,8 @@
     "@ai-sdk/react": "^4.0.86",
     "ai": "^7.0.83",
     "drizzle-orm": "^0.45.2",
+    "imapflow": "^1.7.6",
+    "mailparser": "^3.9.16",
     "mammoth": "^1.12.1",
     "next": "^16.3.3",
     "postgres": "^3.4.9",
@@ -29,6 +31,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/mailparser": "^3.4.6",
     "@types/node": "^26.4.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",

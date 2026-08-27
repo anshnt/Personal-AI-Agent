@@ -1,0 +1,7 @@
+From: alerts@monitor.example
+To: ansh@localhost
+Subject: =?utf-8?B?Q1BVIG92ZXIgOTAlIG9uIGRiLTAx?=
+Date: Fri, 21 Aug 2026 03:12:00 +0000
+Content-Type: text/plain; charset=utf-8
+
+Sustained CPU above 90 percent on db-01 for 15 minutes.

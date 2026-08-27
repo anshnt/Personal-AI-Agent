@@ -1,0 +1,16 @@
+Message-ID: <invoice-4471@vendor.example>
+From: Billing Team <billing@vendor.example>
+To: ansh@localhost
+Subject: Invoice 4471 is due on the 14th
+Date: Mon, 17 Aug 2026 09:14:00 +0000
+Content-Type: text/plain; charset=utf-8
+MIME-Version: 1.0
+
+Hello,
+
+Invoice 4471 for 1,280.00 EUR is due on the 14th of September.
+
+Bank details are unchanged.
+
+Regards,
+Billing

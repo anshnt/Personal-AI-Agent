@@ -90,6 +90,47 @@ export const env = {
     return optional('AGENT_FILES_DIR');
   },
 
+  /* ---------------------------------------------------------------- mail */
+
+  /** `imap`, `local`, or unset to leave mail off entirely. */
+  get mailProvider(): 'imap' | 'local' | undefined {
+    const value = optional('MAIL_PROVIDER');
+    return value === 'imap' || value === 'local' ? value : undefined;
+  },
+
+  /** Address the mailbox belongs to. Defaults to the user's own address. */
+  get mailAddress(): string | undefined {
+    return optional('MAIL_ADDRESS');
+  },
+
+  get imapHost(): string | undefined {
+    return optional('IMAP_HOST');
+  },
+
+  get imapPort(): number {
+    const parsed = Number.parseInt(optional('IMAP_PORT') ?? '', 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 993;
+  },
+
+  get imapUser(): string | undefined {
+    return optional('IMAP_USER');
+  },
+
+  /**
+   * IMAP password, read at connect time and never persisted.
+   *
+   * For Gmail and Outlook this must be an app password: those providers reject
+   * the account password over IMAP.
+   */
+  get imapPassword(): string | undefined {
+    return optional('IMAP_PASSWORD');
+  },
+
+  /** Directory of `.eml` files, for the local mail provider. */
+  get mailLocalDir(): string | undefined {
+    return optional('MAIL_LOCAL_DIR');
+  },
+
   get isProduction(): boolean {
     return process.env.NODE_ENV === 'production';
   },
