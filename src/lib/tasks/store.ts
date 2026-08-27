@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNotNull, lte, sql } from 'drizzle-orm';
+import { and, arrayOverlaps, asc, desc, eq, inArray, isNotNull, lte, sql } from 'drizzle-orm';
 
 import { db } from '@/lib/db';
 import { tasks, type NewTask, type Task, type TaskStatus } from '@/lib/db/schema';
@@ -61,7 +61,10 @@ export async function listTasks(options: ListTasksOptions): Promise<Task[]> {
   const filters = [eq(tasks.userId, options.userId)];
   if (statuses && statuses.length > 0) filters.push(inArray(tasks.status, statuses));
   if (options.tags && options.tags.length > 0) {
-    filters.push(sql`${tasks.tags} && ${normaliseTags(options.tags)}::text[]`);
+    // `arrayOverlaps` rather than a hand-written `&&`: passing a JS array into a
+    // raw sql template binds it as a single scalar, which Postgres then rejects
+    // as a malformed array literal.
+    filters.push(arrayOverlaps(tasks.tags, normaliseTags(options.tags)));
   }
   if (options.dueBefore) {
     filters.push(isNotNull(tasks.dueAt), lte(tasks.dueAt, options.dueBefore));

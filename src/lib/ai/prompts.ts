@@ -37,6 +37,8 @@ export interface PromptContext {
   now: Date;
   /** One-line summaries of pending tasks, so the agent knows without a lookup. */
   openTaskSummaries?: string[];
+  /** Scheduled runs that fired since the user was last here. */
+  pendingRunSummaries?: Array<{ runId: string; title: string; when: string; output: string }>;
 }
 
 function formatInTimezone(date: Date, timezone: string): string {
@@ -114,6 +116,25 @@ export function buildSystemPrompt(context: PromptContext): string {
   if (context.openTaskSummaries && context.openTaskSummaries.length > 0) {
     sections.push(
       `# Their open tasks\n\n${context.openTaskSummaries.map((line) => `- ${line}`).join('\n')}\n\nUse the task tools to change any of these.`,
+    );
+  }
+
+  if (context.pendingRunSummaries && context.pendingRunSummaries.length > 0) {
+    // A schedule that fired into a void is a broken feature: the point of a
+    // reminder is that somebody hears it. Surfacing unreported runs here means
+    // the next conversation delivers them, whatever it was about.
+    const lines = context.pendingRunSummaries
+      .map((run) => `- [${run.runId}] "${run.title}" ran ${run.when}: ${run.output}`)
+      .join('\n');
+
+    sections.push(
+      [
+        '# Scheduled runs the user has not seen',
+        '',
+        lines,
+        '',
+        'Mention anything time-sensitive early in your reply, briefly, before answering what they actually asked. Then call mark_runs_seen with the run ids you reported so they are not repeated.',
+      ].join('\n'),
     );
   }
 

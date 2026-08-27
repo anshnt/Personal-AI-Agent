@@ -180,6 +180,12 @@ async function main(): Promise<void> {
   const dueSoon = await listTasks({ userId: user.id, dueBefore: new Date(Date.now() + 2 * 86_400_000) });
   check('dueBefore filters correctly', dueSoon.length === 1 && dueSoon[0]?.title === 'Draft Q3 plan', dueSoon.map((t) => t.title));
 
+  // The tag filter had a silently broken array binding that no check covered.
+  const byTag = await listTasks({ userId: user.id, tags: ['admin'] });
+  check('the task tag filter works', byTag.length === 1 && byTag[0]?.title === 'Renew passport', byTag.map((t) => t.title));
+  check('the task tag filter normalises case', (await listTasks({ userId: user.id, tags: ['ADMIN'] })).length === 1);
+  check('a tag nothing carries returns nothing', (await listTasks({ userId: user.id, tags: ['nope'] })).length === 0);
+
   const found = await findTaskByTitle(user.id, 'passport');
   check('finds a task by title substring', found.length === 1, found.map((t) => t.title));
 
