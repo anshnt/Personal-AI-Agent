@@ -354,13 +354,32 @@ by user and every query filters on it. Adding real auth means changing
 
 ```bash
 npm run typecheck
-npm run smoke      # needs DATABASE_URL pointing at a scratch database
+npm test           # 224 unit tests, ~2s, no database needed
+npm run smoke      # 255 integration checks; needs DATABASE_URL
 npm run build
 ```
 
-The smoke scripts run against real PostgreSQL, real files, real RFC 5322
-messages, real local HTTP servers, and live calls to a keyless third-party API,
-which is the point. 388 checks cover full-text recall, array overlap filters, upsert paths, cascades,
+Two layers, split by what they need:
+
+**`npm test`** — Vitest, everything pure. Address classification, URL screening,
+chunking invariants, format parsing against real PDF and DOCX bytes, message
+parsing, cron and DST arithmetic, timezone anchoring, the untrusted-content
+envelope, registry construction. Runs in about two seconds with no database and
+no network, so a mistake surfaces immediately.
+
+**`npm run smoke`** — the DB-backed integration checks, against real PostgreSQL,
+real files, real local HTTP servers, and live calls to a keyless third-party API.
+Mocking the driver here would defeat the purpose: full-text search, array
+operators, upserts, cascades, and `FOR UPDATE SKIP LOCKED` are exactly what is
+being verified. They delete all rows in the target database, so point them at a
+scratch one.
+
+CI runs typecheck and unit tests as one job, integration against a Postgres
+service container as another, and the production build as a third — the build
+deliberately without `DATABASE_URL` or `ANTHROPIC_API_KEY`, which is what keeps
+secrets lazily read rather than build-time requirements.
+
+479 checks in total. They cover full-text recall, array overlap filters, upsert paths, cascades,
 cross-tenant isolation, local-time anchoring across DST transition days and
 45-minute offsets, PDF and DOCX extraction from actual bytes, CSV quoting rules,
 chunk boundary and overlap invariants, and every filesystem escape the sandbox is
@@ -375,14 +394,33 @@ to cloud metadata and to loopback, redirect loops, body-size caps without a
 directions, missed-firing skip, two concurrent claims never returning the same
 row, the failure-pause threshold, and resume-after-long-pause.
 
-Three bugs were found this way and are now covered: a lenient mail parser storing
-junk that poisoned the sync cursor, and a `&&` array filter written as a raw SQL
-template, which binds a JS array as a scalar and made the task tag filter fail
-outright. The third was the most interesting: the custom `lookup` used to pin an
-outbound socket to a validated address answered in the wrong callback shape, so
-**every fetch to a real hostname failed** — the web suite had missed it because
-its test server is reached by IP literal, where Node skips DNS entirely. There is
-now a check that goes through a hostname specifically.
+### Bugs this found
+
+Writing the checks — not writing the features — is what surfaced these:
+
+- **The DNS pin was broken for every real hostname.** The custom `lookup` used to
+  pin an outbound socket to a validated address answered in the three-argument
+  form, but Node calls `lookup` with `{ all: true }` and expects an array. The
+  web suite had missed it entirely because its test server is reached by IP
+  literal, where Node skips DNS — so the pinning path was never exercised. There
+  is now a check that goes through a hostname specifically.
+- **The app could not be built without a database.** The Postgres client was
+  created at module scope, so `next build` — which imports every route module to
+  collect its configuration — made `DATABASE_URL` a build-time requirement. The
+  client is now created on first use, behind a proxy, and CI builds with no
+  secrets set at all to keep it that way.
+- **`fec0::/10` site-local IPv6 was not blocked.** The v6 classifier enumerated
+  link-local nibbles individually and missed site-local. Now a single prefix
+  test covers `fc`, `fd`, `fe`, and `ff`.
+- **A missed-firing walk could return a date still in the past.** With a gap
+  larger than its iteration bound, `skipMissed` gave up and returned where it had
+  reached — leaving the schedule permanently overdue and re-firing on every tick.
+- **A lenient mail parser stored junk that poisoned the sync cursor**, dating it
+  "now" and hiding every older message behind it.
+- **An array filter written as a raw SQL template** binds a JS array as a scalar,
+  which made the task tag filter fail outright. Nothing had exercised it.
+- **`describeRelative`'s "right now" branch was unreachable**, because rounding
+  turned 30 seconds into one minute.
 
 They delete all rows in the target database. Point them at a scratch one.
 

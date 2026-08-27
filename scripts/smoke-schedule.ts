@@ -67,63 +67,7 @@ async function main(): Promise<void> {
   await db.delete(users);
   const user = await resolveCurrentUser();
 
-  console.log('cron evaluation');
-  const weekdays = checkCron('0 9 * * 1-5', 'Asia/Kolkata', new Date('2026-08-27T00:00:00Z'));
-  check(
-    'weekday 09:00 IST resolves to 03:30 UTC',
-    iso(weekdays.upcoming[0]!) === '2026-08-27T03:30:00.000Z',
-    weekdays.upcoming.map(iso),
-  );
-  check(
-    'the weekend is skipped',
-    iso(weekdays.upcoming[2]!) === '2026-08-31T03:30:00.000Z',
-    weekdays.upcoming.map(iso),
-  );
-
-  // DST is the case a naive fixed-offset implementation gets wrong.
-  const berlinWinter = nextOccurrence('0 9 * * *', 'Europe/Berlin', new Date('2026-01-10T00:00:00Z'));
-  const berlinSummer = nextOccurrence('0 9 * * *', 'Europe/Berlin', new Date('2026-07-10T00:00:00Z'));
-  check('09:00 Berlin in winter is 08:00 UTC', iso(berlinWinter) === '2026-01-10T08:00:00.000Z', iso(berlinWinter));
-  check('09:00 Berlin in summer is 07:00 UTC', iso(berlinSummer) === '2026-07-10T07:00:00.000Z', iso(berlinSummer));
-
-  const acrossFallBack = nextOccurrence('0 9 * * *', 'Europe/Berlin', new Date('2026-10-24T08:00:00Z'));
-  check(
-    'the offset flips on the transition day itself',
-    iso(acrossFallBack) === '2026-10-25T08:00:00.000Z',
-    iso(acrossFallBack),
-  );
-
-  await expectRejection('a malformed cron is rejected', async () => checkCron('nonsense', 'UTC'));
-  await expectRejection('the wrong field count is rejected', async () => checkCron('0 9 * *', 'UTC'));
-  await expectRejection('an invalid timezone is rejected', async () => checkCron('0 9 * * *', 'Not/AZone'));
-  // A per-minute schedule is a runaway, and each agent_run firing costs tokens.
-  await expectRejection('a per-minute cron is rejected', async () => checkCron('* * * * *', 'UTC'));
-  await expectRejection('an every-two-minute cron is rejected', async () => checkCron('*/2 * * * *', 'UTC'));
-  check('an every-fifteen-minute cron is allowed', checkCron('*/15 * * * *', 'UTC').upcoming.length === 5);
-
-  check(
-    'a daily cron is described in plain language',
-    describeCron('0 9 * * *', 'Europe/Berlin') === 'every day at 09:00 Europe/Berlin',
-    describeCron('0 9 * * *', 'Europe/Berlin'),
-  );
-  check(
-    'a weekday cron is described in plain language',
-    describeCron('30 7 * * 1-5', 'UTC') === 'every weekday at 07:30 UTC',
-    describeCron('30 7 * * 1-5', 'UTC'),
-  );
-
-  console.log('\nmissed firings');
-  // Three days of a daily schedule missed while nothing was running.
-  const outageStart = new Date('2026-08-20T09:00:00Z');
-  const now = new Date('2026-08-23T12:00:00Z');
-  const caught = skipMissed('0 9 * * *', 'UTC', outageStart, now);
-  check('missed firings are skipped, not replayed', caught.skipped >= 2, caught);
-  check('the next firing is in the future', caught.next > now, iso(caught.next));
-  check('the next firing keeps the original cadence', iso(caught.next) === '2026-08-24T09:00:00.000Z', iso(caught.next));
-
-  const noOutage = skipMissed('0 9 * * *', 'UTC', new Date('2026-08-23T09:00:00Z'), new Date('2026-08-23T09:00:30Z'));
-  check('a firing that just happened is not double-skipped', noOutage.skipped === 0, noOutage);
-
+  console.log('schedule store (cron maths is covered by vitest)');
   console.log('\ncreating schedules');
   const oneShot = await createSchedule({
     userId: user.id,

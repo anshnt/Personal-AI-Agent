@@ -71,72 +71,7 @@ async function main(): Promise<void> {
   await db.delete(users);
   const user = await resolveCurrentUser();
 
-  console.log('address classification');
-  const blocked = [
-    '127.0.0.1',
-    '127.1.2.3',
-    '0.0.0.0',
-    '10.1.2.3',
-    '172.16.0.1',
-    '172.31.255.255',
-    '192.168.1.1',
-    '169.254.169.254', // AWS, Azure and GCP instance metadata
-    '100.100.100.200', // Alibaba metadata
-    '100.64.0.1', // carrier-grade NAT
-    '192.0.0.1',
-    '192.0.2.1',
-    '198.18.0.1',
-    '198.51.100.1',
-    '203.0.113.1',
-    '224.0.0.1',
-    '255.255.255.255',
-    '::1',
-    '::',
-    'fe80::1',
-    'fd00::1',
-    'fc00::1',
-    'ff02::1',
-    '::ffff:127.0.0.1', // IPv4-mapped loopback
-    '::ffff:169.254.169.254',
-    '2001:db8::1',
-    '64:ff9b::1',
-    'not-an-ip',
-    '',
-  ];
-  const wrongly = blocked.filter((address) => !isBlockedAddress(address));
-  check('every private, reserved and malformed address is blocked', wrongly.length === 0, wrongly);
-
-  const allowed = ['8.8.8.8', '1.1.1.1', '93.184.216.34', '2606:2800:220:1:248:1893:25c8:1946'];
-  const wronglyBlocked = allowed.filter((address) => isBlockedAddress(address));
-  check('ordinary public addresses are allowed', wronglyBlocked.length === 0, wronglyBlocked);
-
-  // 172.15 and 172.32 sit just outside the private block: an off-by-one here
-  // would either open a hole or break real sites.
-  check('172.15.0.1 is public', !isBlockedAddress('172.15.0.1'));
-  check('172.32.0.1 is public', !isBlockedAddress('172.32.0.1'));
-  check('100.63.0.1 is public', !isBlockedAddress('100.63.0.1'));
-  check('100.128.0.1 is public', !isBlockedAddress('100.128.0.1'));
-
-  console.log('\nurl validation');
-  await expectRefusal('file:// is refused', () => validateTarget('file:///etc/passwd'));
-  await expectRefusal('gopher:// is refused', () => validateTarget('gopher://x.example/'));
-  await expectRefusal('data: is refused', () => validateTarget('data:text/html,<b>x</b>'));
-  await expectRefusal('ftp:// is refused', () => validateTarget('ftp://x.example/'));
-  await expectRefusal('a bare string is refused', () => validateTarget('not a url'));
-  await expectRefusal('localhost by name is refused', () => validateTarget('http://localhost/'));
-  await expectRefusal('a .localhost name is refused', () => validateTarget('http://db.localhost/'));
-  await expectRefusal('a .internal name is refused', () => validateTarget('http://metadata.internal/'));
-  await expectRefusal('loopback by literal is refused', () => validateTarget('http://127.0.0.1:8080/'));
-  await expectRefusal('metadata by literal is refused', () => validateTarget('http://169.254.169.254/latest/meta-data/'));
-  await expectRefusal('a bracketed IPv6 loopback is refused', () => validateTarget('http://[::1]/'));
-  await expectRefusal('embedded credentials are refused', () => validateTarget('http://user:pw@example.com/'));
-  await expectRefusal(
-    'a credential-prefixed lookalike host is refused',
-    () => validateTarget('https://www.google.com@127.0.0.1/'),
-  );
-  await expectRefusal('a non-web port is refused', () => validateTarget('http://example.com:22/'));
-  await expectRefusal('the postgres port is refused', () => validateTarget('http://example.com:5432/'));
-
+  console.log('outbound fetch (address and url rules are covered by vitest)');
   console.log('\nfetching a real server');
   const pageServer = createServer((request, response) => {
     if (request.url === '/page') {
@@ -272,22 +207,8 @@ async function main(): Promise<void> {
     console.log(`  skip hostname pinning checks (${HOSTNAME} does not resolve here)`);
   }
 
-  console.log('\nreadable extraction');
-  const extracted = extractReadable(
-    '<html><head><title>Tide tables</title>' +
-      '<meta name="description" content="When the water moves"></head>' +
-      '<body><nav>Home About</nav><article><h1>Tide tables</h1>' +
-      '<p>High water at 06:12 and 18:34.</p></article><footer>Copyright</footer></body></html>',
-    'https://tides.example/today',
-  );
-  check('the title is extracted', extracted.title === 'Tide tables', extracted.title);
-  check('the description is extracted', extracted.description === 'When the water moves', extracted.description);
-  check('the main text survives', extracted.text.includes('High water at 06:12'), extracted.text);
-  check('navigation chrome is dropped', !extracted.text.includes('Home About'), extracted.text);
-  check('the footer is dropped', !extracted.text.includes('Copyright'), extracted.text);
-
-  const noArticle = extractReadable('<body><p>Just a paragraph in a bare body.</p></body>', 'https://x.example/');
-  check('a page with no article element still extracts', noArticle.text.includes('Just a paragraph'), noArticle.text);
+  // Readable extraction are pure and are covered by the vitest suite; what needs the
+  // database is below.
 
   console.log('\ncache');
   await db.delete(webCache);

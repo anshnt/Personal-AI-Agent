@@ -63,25 +63,7 @@ async function main(): Promise<void> {
   await db.delete(users);
   const user = await resolveCurrentUser();
 
-  console.log('registry');
-  resetRegistry();
-  const builtIns = allConnectors().map((connector) => connector.name);
-  check('the built-in connectors are registered', builtIns.includes('weather') && builtIns.includes('currency'), builtIns);
-
-  const weather = findConnector('weather');
-  check('a keyless connector is available with no configuration', weather !== undefined && isConfigured(weather));
-
-  const github = findConnector('github');
-  delete process.env.GITHUB_TOKEN;
-  check('a key-gated connector is unavailable without its key', github !== undefined && !isConfigured(github));
-  check('an unavailable connector is excluded from the available list', !availableConnectors().some((c) => c.name === 'github'));
-
-  process.env.GITHUB_TOKEN = 'ghp_thisisafaketokenforchecks';
-  check('setting the key makes it available', github !== undefined && isConfigured(github));
-
-  check('every operation declares a description', allConnectors().every((c) => c.operations.every((o) => o.description.length > 10)));
-  check('every base url is https', allConnectors().every((c) => c.baseUrl.startsWith('https://')));
-
+  console.log('connector invocation (registry construction is covered by vitest)');
   console.log('\nparameter validation');
   await expectRefusal(
     'an unknown connector is refused',
