@@ -17,10 +17,11 @@ Built on Next.js, TypeScript, PostgreSQL, and the AI SDK with tool calling.
 | **Reads your mail** | IMAP sync into Postgres, with weighted full-text search, threading, and sender/date/attachment filters. Message bodies reach the model inside an explicit untrusted-content envelope. |
 | **Reads your files** | Uploads and local files are parsed (txt, md, json, csv, html, pdf, docx), chunked, and indexed. The agent searches for a passage, then reads around it. |
 | **Searches the web** | Brave, Tavily, or a self-hosted SearXNG behind one interface, with caching, result de-duplication, and readable-text extraction. Every URL passes an SSRF guard before anything connects. |
+| **Schedules things** | One-off reminders and cron schedules in the user's timezone, DST included. A schedule can also be an *agent run* — a prompt executed unattended with the full tool set, so "every weekday at 8, check my mail and add anything urgent to my list" actually works. |
 | **Shows its work** | Every tool call and its result is rendered inline, collapsed. Every execution is also written to an audit table. |
 
-Scheduling and external API connectors land in follow-up work; the tool layer is
-built to take them without changes to the agent loop.
+External API connectors land in follow-up work; the tool layer is built to take
+them without changes to the agent loop.
 
 ## Getting started
 
@@ -48,6 +49,10 @@ The rest have working defaults — identity (`DEFAULT_USER_EMAIL`,
 `DEFAULT_USER_NAME`, `DEFAULT_USER_TIMEZONE`), models (`AGENT_MODEL`,
 `UTILITY_MODEL`), and loop bounds (`AGENT_EFFORT`, `MAX_AGENT_STEPS`). See
 `.env.example` for the full list.
+
+Scheduling is off until `CRON_SECRET` is set. Then point any scheduler at
+`POST /api/cron` with the secret as a bearer token — Vercel Cron, a systemd
+timer, a Kubernetes CronJob, or `curl` from crontab all work.
 
 Web search is off until one of `BRAVE_SEARCH_API_KEY`, `TAVILY_API_KEY`, or
 `SEARXNG_URL` is set. Any one is enough.
@@ -80,7 +85,8 @@ src/app/api/chat/route.ts
   ├── build system prompt ──── stable instructions first, volatile context last
   │
   ├── streamText ───────────── model + tools, bounded by MAX_AGENT_STEPS
-  │     └── tools ─────────── memory · tasks · time · documents · email · web
+  │     └── tools ─────────── memory · tasks · time · documents
+  │                            email · web · schedule
   │           └── each one audited to tool_executions
   │
   └── onFinish (after the user already has their answer)
@@ -101,6 +107,7 @@ src/
     api/documents/           upload, list, read, delete
     api/email/               mail listing and sync trigger
     api/web/                 search, and cache purge
+    api/cron/                fire due schedules (authenticated)
     page.tsx, layout.tsx     the UI shell
   components/
     chat.tsx                 conversation view and composer
@@ -128,6 +135,9 @@ src/
     web/providers.ts         brave, tavily, searxng
     web/search.ts            search orchestration and result sanitising
     web/cache.ts             per-user cache for searches and fetches
+    schedule/cron.ts         timezone-aware cron, misfire policy
+    schedule/store.ts        crud, atomic claiming, run records
+    schedule/runner.ts       executes due schedules through the agent
     tasks/store.ts           task CRUD and querying
     time.ts                  timezone-correct date maths
     tools/                   the tool surface the model sees
@@ -137,6 +147,7 @@ scripts/
   smoke-documents.ts         parsing, chunking, search, file sandbox
   smoke-email.ts             mail parsing, sync, search, injection framing
   smoke-web.ts               ssrf guard, extraction, cache, search
+  smoke-schedule.ts          cron and dst, concurrency, misfires
   fixtures/                  real pdf, docx, csv, html, and .eml messages
 ```
 
@@ -194,6 +205,43 @@ boundary and neither is retrievable.
 
 **Re-ingesting the same bytes replaces, it does not duplicate.** Documents are
 keyed by content hash per user, so syncing a folder twice is idempotent.
+
+**Two runners must never fire the same schedule.** Claiming uses
+`SELECT ... FOR UPDATE SKIP LOCKED` and advances `nextRunAt` inside the same
+transaction. A slow run still in flight when the next cron ping arrives, or two
+instances behind a load balancer, would otherwise mean duplicate reminders and
+double-billed agent runs. `SKIP LOCKED` also means a slow run cannot stall the
+queue behind it.
+
+**A missed schedule fires once, not five times.** If the app was down for three
+days, a daily schedule should resume its cadence — not replay the backlog,
+spending tokens on stale work and burying the user in notifications about
+mornings that have already passed.
+
+**Cron is evaluated in the user's timezone on every firing, not resolved once.**
+"Weekdays at 9" means 9 in their morning, and it has to keep meaning that across
+a daylight-saving change. An offset captured in July is wrong in December. The
+smoke suite asserts the UTC instant on both sides of a transition and on the
+transition day itself.
+
+**A schedule that fires more often than every five minutes is rejected.** The
+agent writing `* * * * *` by accident is a plausible mistake, and on an agent run
+it is an expensive one.
+
+**Repeated failure pauses the schedule.** A job failing every time is not going
+to fix itself, and each attempt costs tokens; after five consecutive failures it
+stops and waits for a human. Resuming clears the failure state and recomputes the
+timing, so a schedule paused for a week does not fire the instant it resumes.
+
+**A schedule that fires into a void is a broken feature.** Unreported run results
+are injected into the next conversation's system prompt, whatever that
+conversation is about, and the agent marks them seen once it has actually
+mentioned them.
+
+**The cron endpoint refuses to run unauthenticated.** With no `CRON_SECRET` it
+returns 503 rather than staying open: anyone who found the URL could otherwise
+make the app spend tokens on every scheduled agent run, as often as they liked.
+The comparison is constant-time.
 
 **A URL the model chose is an SSRF vector, and the payoff is high.**
 `169.254.169.254` returns cloud instance credentials; `localhost` reaches this
@@ -275,7 +323,7 @@ npm run build
 ```
 
 The smoke scripts run against real PostgreSQL, real files, real RFC 5322
-messages, and real local HTTP servers, which is the point. 271 checks cover
+messages, and real local HTTP servers, which is the point. 339 checks cover
 full-text recall, array overlap filters, upsert paths, cascades,
 cross-tenant isolation, local-time anchoring across DST transition days and
 45-minute offsets, PDF and DOCX extraction from actual bytes, CSV quoting rules,
@@ -287,7 +335,14 @@ and both untrusted-envelope escape attempts. On the web side: every private and
 reserved range including the off-by-one boundaries, `file://` and non-web ports,
 loopback by name and by literal, credential-prefixed lookalike hosts, redirects
 to cloud metadata and to loopback, redirect loops, body-size caps without a
-`Content-Length`, and read timeouts.
+`Content-Length`, and read timeouts. On scheduling: cron across both DST
+directions, missed-firing skip, two concurrent claims never returning the same
+row, the failure-pause threshold, and resume-after-long-pause.
+
+Two bugs were found this way and are now covered: a lenient mail parser storing
+junk that poisoned the sync cursor, and a `&&` array filter written as a raw SQL
+template, which binds a JS array as a scalar and made the task tag filter fail
+outright.
 
 They delete all rows in the target database. Point them at a scratch one.
 

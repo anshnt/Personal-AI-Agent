@@ -2,6 +2,7 @@ import type { ToolSet } from 'ai';
 
 import { documentTools } from './documents';
 import { emailTools } from './email';
+import { scheduleTools } from './schedule';
 import { webTools } from './web';
 import { memoryTools } from './memory';
 import { taskTools } from './tasks';
@@ -28,5 +29,6 @@ export function buildTools(context: AgentContext): ToolSet {
     ...documentTools(context),
     ...emailTools(context),
     ...webTools(context),
+    ...scheduleTools(context),
   };
 }

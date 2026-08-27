@@ -13,7 +13,9 @@ import { resolveCurrentUser } from '@/lib/db/users';
 import { env } from '@/lib/env';
 import { extractAndStoreMemories } from '@/lib/memory/extract';
 import { recall } from '@/lib/memory/store';
+import { unreadRuns } from '@/lib/schedule/store';
 import { openTaskSummaries } from '@/lib/tasks/store';
+import { describeRelative } from '@/lib/time';
 import { buildTools } from '@/lib/tools';
 
 export const maxDuration = 120;
@@ -53,9 +55,10 @@ export async function POST(request: Request): Promise<Response> {
 
   // Recall against the incoming message so the prompt carries the memories that
   // are relevant to *this* turn, not just the globally important ones.
-  const [memories, taskSummaries] = await Promise.all([
+  const [memories, taskSummaries, pendingRuns] = await Promise.all([
     recall({ userId: user.id, query: userText, limit: 14 }),
     openTaskSummaries(user.id),
+    unreadRuns(user.id, 6),
   ]);
 
   // With no lexical hits, fall back to the highest-signal memories so a new
@@ -70,6 +73,15 @@ export async function POST(request: Request): Promise<Response> {
       memories: contextMemories,
       now: new Date(),
       openTaskSummaries: taskSummaries,
+      pendingRunSummaries: pendingRuns.map((run) => ({
+        runId: run.id,
+        title: run.title,
+        when: describeRelative(run.startedAt),
+        output:
+          run.status === 'failed'
+            ? `failed: ${run.error ?? 'no detail'}`
+            : (run.output ?? '(no output)').slice(0, 600),
+      })),
     }),
     messages: await convertToModelMessages(uiMessages),
     tools: buildTools(context),

@@ -350,6 +350,111 @@ export const webCache = pgTable(
 );
 
 /* -------------------------------------------------------------------------- */
+/* Schedules                                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `reminder`  — surface a message to the user at a time.
+ * `agent_run` — run a prompt through the agent, with all its tools available,
+ *               so a schedule can actually do work rather than just nag.
+ */
+export const scheduleKind = pgEnum('schedule_kind', ['reminder', 'agent_run']);
+
+export const scheduleStatus = pgEnum('schedule_status', [
+  'active',
+  'paused',
+  'completed',
+  'failed',
+]);
+
+export const schedules = pgTable(
+  'schedules',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    title: text().notNull(),
+    kind: scheduleKind().notNull().default('reminder'),
+    /**
+     * What to do when it fires: the reminder text, or the prompt to run.
+     * Written by the agent at creation time, read back at fire time.
+     */
+    payload: text().notNull(),
+
+    /* --- timing: exactly one of cron or runAt --- */
+
+    /** Five-field cron expression, for a recurring schedule. */
+    cron: text(),
+    /** Timezone the cron is evaluated in. Never the server's. */
+    timezone: text().notNull().default('UTC'),
+    /** Fire time, for a one-shot schedule. */
+    runAt: timestamp({ withTimezone: true }),
+
+    /* --- state --- */
+
+    status: scheduleStatus().notNull().default('active'),
+    /** When this is next due. The runner's only query predicate. */
+    nextRunAt: timestamp({ withTimezone: true }),
+    lastRunAt: timestamp({ withTimezone: true }),
+    runCount: integer().notNull().default(0),
+    /** Stop after this many runs. Null means indefinitely. */
+    maxRuns: integer(),
+    consecutiveFailures: integer().notNull().default(0),
+    lastError: text(),
+    sourceConversationId: uuid().references(() => conversations.id, { onDelete: 'set null' }),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // The runner's hot path: due-and-active, oldest first.
+    index('schedules_due_idx').on(table.status, table.nextRunAt),
+    index('schedules_user_idx').on(table.userId, table.status),
+  ],
+);
+
+export const scheduleRunStatus = pgEnum('schedule_run_status', [
+  'running',
+  'succeeded',
+  'failed',
+  'skipped',
+]);
+
+/**
+ * One row per firing.
+ *
+ * A schedule that quietly stopped working is the worst failure mode for this
+ * feature — the user finds out by missing something. The run log is what makes
+ * that visible, and it is what the agent reads to answer "did that run?".
+ */
+export const scheduleRuns = pgTable(
+  'schedule_runs',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    scheduleId: uuid()
+      .notNull()
+      .references(() => schedules.id, { onDelete: 'cascade' }),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    status: scheduleRunStatus().notNull().default('running'),
+    /** When this firing was due, as distinct from when it actually ran. */
+    scheduledFor: timestamp({ withTimezone: true }).notNull(),
+    startedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp({ withTimezone: true }),
+    /** What the run produced: the reminder text, or the agent's answer. */
+    output: text(),
+    error: text(),
+    /** Set when the user has seen it. Unread runs are what get surfaced. */
+    acknowledgedAt: timestamp({ withTimezone: true }),
+  },
+  (table) => [
+    index('schedule_runs_schedule_idx').on(table.scheduleId, table.startedAt.desc()),
+    index('schedule_runs_user_unread_idx').on(table.userId, table.acknowledgedAt),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
 /* Observability                                                              */
 /* -------------------------------------------------------------------------- */
 
@@ -411,5 +516,10 @@ export type Email = typeof emails.$inferSelect;
 export type NewEmail = typeof emails.$inferInsert;
 export type MailProviderKind = EmailAccount['provider'];
 export type WebCacheEntry = typeof webCache.$inferSelect;
+export type Schedule = typeof schedules.$inferSelect;
+export type NewSchedule = typeof schedules.$inferInsert;
+export type ScheduleRun = typeof scheduleRuns.$inferSelect;
+export type ScheduleKind = Schedule['kind'];
+export type ScheduleStatus = Schedule['status'];
 export type MemoryKind = Memory['kind'];
 export type TaskStatus = Task['status'];

@@ -29,6 +29,13 @@
       "when": 1787837332034,
       "tag": "0003_web_cache",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787837867087,
+      "tag": "0004_schedules",
+      "breakpoints": true
     }
   ]
 }

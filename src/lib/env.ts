@@ -152,6 +152,19 @@ export const env = {
     return optional('SEARXNG_URL');
   },
 
+  /* ------------------------------------------------------------ schedules */
+
+  /**
+   * Shared secret for `/api/cron`.
+   *
+   * Unset disables the endpoint entirely rather than leaving it open: anyone
+   * who found the URL could otherwise make this application spend tokens on
+   * every scheduled agent run, as often as they liked.
+   */
+  get cronSecret(): string | undefined {
+    return optional('CRON_SECRET');
+  },
+
   get isProduction(): boolean {
     return process.env.NODE_ENV === 'production';
   },
